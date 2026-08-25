@@ -1,13 +1,440 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+enum ApplicationStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum MemberStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum OAuthProvider {
+  GOOGLE
+  GITHUB
+}
+
+enum MfaType {
+  TOTP
+  EMAIL_OTP
+  SMS_OTP
+  WEBAUTHN
+}
+
+enum TokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  EMAIL_CHANGE
+  MFA_CHALLENGE
+}
+
+enum ApiKeyType {
+  PUBLISHABLE
+  SECRET
+}
+
+enum AuditActorType {
+  USER
+  API_KEY
+  SYSTEM
+}
+
+model User {
+  id           String    @id @default(cuid())
+  firstName    String?
+  lastName     String?
+  username     String?   @unique
+  avatarUrl    String?
+  passwordHash String?
+  disabledAt   DateTime?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  emails        UserEmail[]
+  oauthAccounts OAuthAccount[]
+  memberships   Membership[]
+  ownedApps     Application[]  @relation("ApplicationOwner")
+
+  sessions      Session[]
+  devices       Device[]
+  mfaMethods    MfaMethod[]
+  recoveryCodes MfaRecoveryCode[]
+  tokens        OneTimeToken[]
+
+  createdApiKeys ApiKey[] @relation("ApiKeyCreator")
+
+  auditLogs AuditLog[]
+
+  @@index([createdAt])
+  @@index([disabledAt])
+}
+
+model UserEmail {
+  id         String    @id @default(cuid())
+  userId     String
+  email      String    @unique
+  normalized String    @unique
+  isPrimary  Boolean   @default(false)
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isPrimary])
+  @@index([verifiedAt])
+}
+
+model Application {
+  id                 String            @id @default(cuid())
+  ownerId            String
+  name               String
+  slug               String            @unique
+  status             ApplicationStatus @default(ACTIVE)
+  logoUrl            String?
+  homepageUrl        String?
+  allowedOrigins     String[]
+  redirectUris       String[]
+  accessTokenTtlSec  Int               @default(900)
+  refreshTokenTtlSec Int               @default(2592000)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  owner User @relation("ApplicationOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+
+  memberships  Membership[]
+  roles        Role[]
+  permissions  Permission[]
+  sessions     Session[]
+  apiKeys      ApiKey[]
+  oauthConfigs OAuthProviderConfig[]
+  tokens       OneTimeToken[]
+  auditLogs    AuditLog[]
+  invitations Invitation[]
+
+  @@index([ownerId])
+  @@index([status])
+}
+
+model Membership {
+  id            String       @id @default(cuid())
+  applicationId String
+  userId        String
+  status        MemberStatus @default(ACTIVE)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  roles MembershipRole[]
+
+  @@unique([applicationId, userId])
+  @@index([applicationId])
+  @@index([userId])
+  @@index([status])
+}
+
+model Role {
+  id            String   @id @default(cuid())
+  applicationId String
+  name          String
+  description   String?
+  isSystem      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  permissions RolePermission[]
+  members     MembershipRole[]
+
+  @@unique([applicationId, name])
+  @@index([applicationId])
+}
+
+model Permission {
+  id            String   @id @default(cuid())
+  applicationId String
+  key           String
+  description   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  roles RolePermission[]
+
+  @@unique([applicationId, key])
+  @@index([applicationId])
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model MembershipRole {
+  membershipId String
+  roleId       String
+  createdAt    DateTime @default(now())
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([membershipId, roleId])
+  @@index([roleId])
+}
+
+model OAuthAccount {
+  id                String        @id @default(cuid())
+  userId            String
+  provider          OAuthProvider
+  providerAccountId String
+  accessTokenEnc    String?
+  refreshTokenEnc   String?
+  tokenExpiresAt    DateTime?
+  scopes            String[]
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+model OAuthProviderConfig {
+  id              String        @id @default(cuid())
+  applicationId   String
+  provider        OAuthProvider
+  clientId        String
+  clientSecretEnc String
+  enabled         Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, provider])
+  @@index([applicationId])
+}
+
+model Device {
+  id          String   @id @default(cuid())
+  userId      String
+  fingerprint String?
+  name        String?
+  userAgent   String?
+  ipAddress   String?
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sessions Session[]
+
+  @@index([userId])
+  @@index([fingerprint])
+  @@index([lastSeenAt])
+}
+
+model Session {
+  id            String    @id @default(cuid())
+  applicationId String
+  userId        String
+  deviceId      String?
+  ipAddress     String?
+  userAgent     String?
+  expiresAt     DateTime
+  lastActiveAt  DateTime  @default(now())
+  revokedAt     DateTime?
+  revokeReason  String?
+  createdAt     DateTime  @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device      Device?     @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  refreshTokens RefreshToken[]
+
+  @@index([applicationId, userId])
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@index([deviceId])
+}
+
+model RefreshToken {
+  id            String    @id @default(cuid())
+  sessionId     String
+  tokenHash     String    @unique
+  familyId      String
+  parentTokenId String?   @unique
+  expiresAt     DateTime
+  usedAt        DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  parentToken RefreshToken?  @relation("TokenRotation", fields: [parentTokenId], references: [id], onDelete: SetNull)
+  childTokens RefreshToken[] @relation("TokenRotation")
+
+  @@index([sessionId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
+model OneTimeToken {
+  id            String       @id @default(cuid())
+  applicationId String
+  userId        String
+  purpose       TokenPurpose
+  tokenHash     String       @unique
+  target        String?
+  expiresAt     DateTime
+  usedAt        DateTime?
+  attempts      Int          @default(0)
+  createdAt     DateTime     @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+  @@index([applicationId, purpose])
+  @@index([expiresAt])
+}
+
+model MfaMethod {
+  id         String    @id @default(cuid())
+  userId     String
+  type       MfaType
+  label      String?
+  secretEnc  String?
+  credential Json?
+  enabled    Boolean   @default(false)
+  verifiedAt DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, enabled])
+  @@index([type])
+}
+
+model MfaRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+}
+
+model ApiKey {
+  id            String     @id @default(cuid())
+  applicationId String
+  createdById   String?
+  name          String
+  type          ApiKeyType
+  prefix        String
+  keyHash       String?
+  publicKey     String?
+  scopes        String[]
+  lastUsedAt    DateTime?
+  expiresAt     DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  createdBy   User?       @relation("ApiKeyCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  auditLogs AuditLog[]
+
+  @@index([applicationId, revokedAt])
+  @@index([prefix])
+  @@index([type])
+}
+
+model AuditLog {
+  id            String         @id @default(cuid())
+  applicationId String?
+  userId        String?
+  apiKeyId      String?
+  actorType     AuditActorType
+  action        String
+  resourceType  String?
+  resourceId    String?
+  ipAddress     String?
+  userAgent     String?
+  metadata      Json?
+  createdAt     DateTime       @default(now())
+
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  user        User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  apiKey      ApiKey?      @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId, createdAt])
+  @@index([userId, createdAt])
+  @@index([apiKeyId, createdAt])
+  @@index([action, createdAt])
+}
+
+model LoginAttempt {
+  id            String   @id @default(cuid())
+  applicationId String?
+  email         String
+  successful    Boolean  @default(false)
+  failureReason String?
+  ipAddress     String?
+  userAgent     String?
+  attemptedAt   DateTime @default(now())
+
+  @@index([email, attemptedAt])
+  @@index([ipAddress, attemptedAt])
+  @@index([applicationId, attemptedAt])
+}
+
+model Invitation {
+  id            String    @id @default(cuid())
+  applicationId String
+  email         String
+  tokenHash     String    @unique
+  expiresAt     DateTime
+  acceptedAt    DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([email])
+  @@index([expiresAt])
 }
