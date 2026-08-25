@@ -261,7 +261,7 @@ model Device {
 
 model Session {
   id            String    @id @default(cuid())
-  applicationId String
+  applicationId String?
   userId        String
   deviceId      String?
   ipAddress     String?
@@ -272,9 +272,9 @@ model Session {
   revokeReason  String?
   createdAt     DateTime  @default(now())
 
-  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  device      Device?     @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  application Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device      Device?      @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
   refreshTokens RefreshToken[]
 
