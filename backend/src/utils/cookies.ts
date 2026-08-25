@@ -4,7 +4,7 @@ import type {
   Response,
 } from "express";
 
-import { env } from "../config/env.js";
+import { env } from "../config/env.ts";
 
 const production =
   env.NODE_ENV === "production";

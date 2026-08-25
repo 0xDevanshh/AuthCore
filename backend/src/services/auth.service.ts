@@ -2,23 +2,23 @@ import {
   Prisma,
 } from "@prisma/client";
 
-import { prisma } from "../config/prisma.js";
+import { prisma } from "../config/prisma.ts";
 
 import {
   hashPassword,
   verifyPassword,
-} from "../utils/password.js";
+} from "../utils/password.ts";
 
-import { AppError } from "../utils/app-error.js";
+import { AppError } from "../utils/app-error.ts";
 
 import {
   createSession,
-} from "./session.service.js";
+} from "./session.service.ts";
 
 import type {
   LoginInput,
   SignupInput,
-} from "../validators/auth.validator.js";
+} from "../validators/auth.validator.ts";
 
 interface SessionMetadata {
   ipAddress?: string | null;
@@ -166,7 +166,7 @@ export async function signup(
   } catch (error) {
     if (
       error instanceof
-        Prisma.PrismaClientKnownRequestError &&
+      Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
       throw new AppError(

@@ -3,9 +3,9 @@ import {
   jwtVerify,
 } from "jose";
 
-import { env } from "../../config/env.js";
+import { env } from "../../config/env.ts";
 
-import { AppError } from "../../utils/app-error.js";
+import { AppError } from "../../utils/app-error.ts";
 
 interface GoogleAuthorizationInput {
   state: string;

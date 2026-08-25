@@ -6,19 +6,19 @@ import {
   randomUUID,
 } from "node:crypto";
 
-import { prisma } from "../config/prisma.js";
-import { env } from "../config/env.js";
+import { prisma } from "../config/prisma.ts";
+import { env } from "../config/env.ts";
 
-import { AppError } from "../utils/app-error.js";
+import { AppError } from "../utils/app-error.ts";
 
 import {
   generateOpaqueToken,
   hashOpaqueToken,
-} from "../utils/token.js";
+} from "../utils/token.ts";
 
 import {
   signAccessToken,
-} from "../utils/jwt.js";
+} from "../utils/jwt.ts";
 
 interface SessionMetadata {
   ipAddress?: string | null;
@@ -30,13 +30,13 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
-class RefreshReuseDetected extends Error {}
+class RefreshReuseDetected extends Error { }
 
 function refreshExpiry(): Date {
   return new Date(
     Date.now() +
-      env.REFRESH_TOKEN_TTL_SECONDS *
-        1000,
+    env.REFRESH_TOKEN_TTL_SECONDS *
+    1000,
   );
 }
 
@@ -282,12 +282,12 @@ export async function rotateRefreshToken(
   } catch (error) {
     const uniqueRace =
       error instanceof
-        Prisma.PrismaClientKnownRequestError &&
+      Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002";
 
     if (
       error instanceof
-        RefreshReuseDetected ||
+      RefreshReuseDetected ||
       uniqueRace
     ) {
       await revokeFamily(

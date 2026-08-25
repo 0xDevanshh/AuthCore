@@ -1,10 +1,10 @@
-import { env } from "../../config/env.js";
+import { env } from "../../config/env.ts";
 
-import { AppError } from "../../utils/app-error.js";
+import { AppError } from "../../utils/app-error.ts";
 
 import type {
   OAuthIdentity,
-} from "./google.oauth.js";
+} from "./google.oauth.ts";
 
 interface GitHubTokenResponse {
   access_token?: string;

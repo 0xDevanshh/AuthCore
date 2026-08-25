@@ -2,8 +2,8 @@ import jwt, {
   type JwtPayload,
 } from "jsonwebtoken";
 
-import { env } from "../config/env.js";
-import { AppError } from "./app-error.js";
+import { env } from "../config/env.ts";
+import { AppError } from "./app-error.ts";
 
 interface AccessTokenInput {
   userId: string;

@@ -3,7 +3,7 @@ import {
   randomBytes,
 } from "node:crypto";
 
-import { env } from "../config/env.js";
+import { env } from "../config/env.ts";
 
 export function generateOpaqueToken(): string {
   return randomBytes(48).toString("base64url");

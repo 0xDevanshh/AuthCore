@@ -2,21 +2,21 @@ import {
   OAuthProvider,
 } from "@prisma/client";
 
-import { prisma } from "../config/prisma.js";
+import { prisma } from "../config/prisma.ts";
 
-import { AppError } from "../utils/app-error.js";
+import { AppError } from "../utils/app-error.ts";
 
 import {
   createSession,
-} from "./session.service.js";
+} from "./session.service.ts";
 
 import {
   getSafeUser,
-} from "./auth.service.js";
+} from "./auth.service.ts";
 
 import type {
   OAuthIdentity,
-} from "./oauth/google.oauth.js";
+} from "./oauth/google.oauth.ts";
 
 interface SessionMetadata {
   ipAddress?: string | null;
@@ -54,12 +54,12 @@ export async function loginWithOAuth(
           await tx.oAuthAccount.findUnique({
             where: {
               provider_providerAccountId:
-                {
-                  provider,
+              {
+                provider,
 
-                  providerAccountId:
-                    identity.providerAccountId,
-                },
+                providerAccountId:
+                  identity.providerAccountId,
+              },
             },
 
             include: {
@@ -130,7 +130,7 @@ export async function loginWithOAuth(
           if (
             providerAlreadyLinked &&
             providerAlreadyLinked.providerAccountId !==
-              identity.providerAccountId
+            identity.providerAccountId
           ) {
             throw new AppError(
               409,
