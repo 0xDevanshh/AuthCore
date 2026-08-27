@@ -1,6 +1,10 @@
 import { Router } from "express";
 
-import { sendInvitationController } from "../controllers/invitation.controller.ts";
+import {
+  listInvitationsController,
+  revokeInvitationController,
+  sendInvitationController,
+} from "../controllers/invitation.controller.ts";
 
 import { asyncHandler } from "../utils/async-handler.ts";
 
@@ -21,4 +25,24 @@ invitationRouter.post(
   ),
 
   asyncHandler(sendInvitationController),
+);
+
+invitationRouter.get(
+  "/",
+
+  requirePermission(
+    PERMISSIONS.MEMBER_INVITE,
+  ),
+
+  asyncHandler(listInvitationsController),
+);
+
+invitationRouter.delete(
+  "/:invitationId",
+
+  requirePermission(
+    PERMISSIONS.MEMBER_INVITE,
+  ),
+
+  asyncHandler(revokeInvitationController),
 );

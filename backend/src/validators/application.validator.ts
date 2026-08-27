@@ -72,3 +72,8 @@ export type SendInvitationInput = z.infer<
 export const acceptInvitationSchema = z.object({
   token: z.string().trim().min(1, "Invitation token is required").max(512),
 });
+
+export const invitationIdParamSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  invitationId: z.string().trim().min(1).max(64),
+});

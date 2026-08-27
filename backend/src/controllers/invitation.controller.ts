@@ -3,11 +3,14 @@ import type { Request, Response } from "express";
 import {
   acceptInvitationSchema,
   applicationIdParamSchema,
+  invitationIdParamSchema,
   sendInvitationSchema,
 } from "../validators/application.validator.ts";
 
 import {
   acceptInvitation,
+  listPendingInvitations,
+  revokeInvitation,
   sendInvitation,
 } from "../services/invitation.service.ts";
 
@@ -86,5 +89,49 @@ export async function acceptInvitationController(
         joinedAt: membership.createdAt,
       },
     },
+  });
+}
+
+export async function listInvitationsController(
+  req: Request,
+  res: Response,
+) {
+  const params = applicationIdParamSchema.parse(req.params);
+
+  const invitations = await listPendingInvitations(
+    params.id,
+  );
+
+  res.status(200).json({
+    success: true,
+
+    data: { invitations },
+  });
+}
+
+export async function revokeInvitationController(
+  req: Request,
+  res: Response,
+) {
+  const auth = authContext(req);
+
+  const params = invitationIdParamSchema.parse(req.params);
+
+  const invitation = await revokeInvitation(
+    params.id,
+    params.invitationId,
+    auth.userId,
+    {
+      ipAddress: req.ip ?? null,
+      userAgent: req.get("user-agent") ?? null,
+    },
+  );
+
+  res.status(200).json({
+    success: true,
+
+    message: "Invitation revoked",
+
+    data: { invitation },
   });
 }

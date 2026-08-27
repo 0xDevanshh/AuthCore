@@ -465,3 +465,170 @@ export async function acceptInvitation(
     return membership;
   }, SERIALIZABLE);
 }
+
+export interface PendingInvitationSummary {
+  id: string;
+  invitedEmail: string;
+  roleId: string;
+  roleName: string;
+  invitedBy: string;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+/**
+ * Lists invitations that are still actionable — not accepted, not revoked,
+ * not expired.
+ *
+ * `select` is explicit and omits tokenHash, so the token cannot leak
+ * through this path even if the shape is extended later.
+ */
+export async function listPendingInvitations(
+  applicationId: string,
+): Promise<PendingInvitationSummary[]> {
+  const invitations =
+    await prisma.invitation.findMany({
+      where: {
+        applicationId,
+
+        acceptedAt: null,
+        revokedAt: null,
+
+        expiresAt: { gt: new Date() },
+      },
+
+      select: {
+        id: true,
+        email: true,
+        roleId: true,
+        invitedBy: true,
+        createdAt: true,
+        expiresAt: true,
+
+        role: {
+          select: { name: true },
+        },
+      },
+
+      orderBy: { createdAt: "desc" },
+    });
+
+  return invitations.map((invitation) => ({
+    id: invitation.id,
+    invitedEmail: invitation.email,
+    roleId: invitation.roleId,
+    roleName: invitation.role.name,
+    invitedBy: invitation.invitedBy,
+    createdAt: invitation.createdAt,
+    expiresAt: invitation.expiresAt,
+  }));
+}
+
+export interface RevokedInvitationSummary {
+  id: string;
+  invitedEmail: string;
+  revokedAt: Date;
+}
+
+/**
+ * Revokes an invitation by stamping `revokedAt`.
+ *
+ * The row is kept, not deleted, so audit entries referencing it stay
+ * resolvable. acceptInvitation already rejects revoked invitations with
+ * INVITATION_REVOKED, so this immediately invalidates the outstanding link.
+ *
+ * Idempotent: revoking an already-revoked invitation returns it unchanged
+ * rather than moving the original timestamp.
+ */
+export async function revokeInvitation(
+  applicationId: string,
+  invitationId: string,
+  requestedBy: string,
+  metadata: {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  } = {},
+): Promise<RevokedInvitationSummary> {
+  return prisma.$transaction(async (tx) => {
+    const invitation =
+      await tx.invitation.findFirst({
+        where: {
+          id: invitationId,
+          applicationId,
+        },
+
+        select: {
+          id: true,
+          email: true,
+          roleId: true,
+          acceptedAt: true,
+          revokedAt: true,
+
+          role: {
+            select: { name: true },
+          },
+        },
+      });
+
+    if (!invitation) {
+      throw new AppError(
+        404,
+        "Invitation not found in this application",
+      );
+    }
+
+    // An accepted invitation is spent, not pending; revoking it would
+    // imply the resulting membership is undone, which it is not. Remove
+    // the member through DELETE /members/:membershipId instead.
+    if (invitation.acceptedAt) {
+      throw new AppError(
+        400,
+        "Cannot revoke an invitation that has already been accepted",
+        "INVITATION_ALREADY_ACCEPTED",
+      );
+    }
+
+    if (invitation.revokedAt) {
+      return {
+        id: invitation.id,
+        invitedEmail: invitation.email,
+        revokedAt: invitation.revokedAt,
+      };
+    }
+
+    const revokedAt = new Date();
+
+    await tx.invitation.update({
+      where: { id: invitation.id },
+      data: { revokedAt },
+    });
+
+    await logAuditEvent({
+      tx,
+
+      action: "INVITATION_REVOKED",
+      actorType: AuditActorType.USER,
+
+      applicationId,
+      userId: requestedBy,
+
+      resourceType: "Invitation",
+      resourceId: invitation.id,
+
+      ipAddress: metadata.ipAddress ?? null,
+      userAgent: metadata.userAgent ?? null,
+
+      metadata: {
+        email: invitation.email,
+        roleId: invitation.roleId,
+        roleName: invitation.role.name,
+      },
+    });
+
+    return {
+      id: invitation.id,
+      invitedEmail: invitation.email,
+      revokedAt,
+    };
+  });
+}
