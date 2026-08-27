@@ -20,6 +20,13 @@ interface OAuthStatePayload
   provider: OAuthProviderName;
   codeVerifier: string;
   nonce: string;
+
+  /**
+   * Application the flow was started for. Carried inside the signed state
+   * token because the provider's callback redirect is a browser navigation
+   * that cannot present the API key header.
+   */
+  applicationId: string;
 }
 
 export interface OAuthState {
@@ -38,6 +45,7 @@ function randomValue(): string {
 
 export function createOAuthState(
   provider: OAuthProviderName,
+  applicationId: string,
 ): OAuthState {
   const state = randomValue();
 
@@ -58,6 +66,7 @@ export function createOAuthState(
       provider,
       codeVerifier,
       nonce,
+      applicationId,
     },
     env.OAUTH_STATE_SECRET,
     {
@@ -121,6 +130,16 @@ export function verifyOAuthState(
     throw new AppError(
       400,
       "OAuth state mismatch",
+    );
+  }
+
+  if (
+    typeof payload.applicationId !==
+    "string"
+  ) {
+    throw new AppError(
+      400,
+      "OAuth state is missing application context",
     );
   }
 

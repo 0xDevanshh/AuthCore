@@ -36,6 +36,11 @@ import {
   signupLimiter,
 } from "../middleware/rate-limit.middleware.ts";
 
+import {
+  resolveApplication,
+  resolveApplicationFromRedirect,
+} from "../middleware/resolveApplication.middleware.ts";
+
 export const authRouter =
   Router();
 
@@ -44,6 +49,7 @@ authRouter.post(
 
   verifyRequestOrigin,
   signupLimiter,
+  resolveApplication,
 
   asyncHandler(
     signupController,
@@ -55,6 +61,7 @@ authRouter.post(
 
   verifyRequestOrigin,
   loginLimiter,
+  resolveApplication,
 
   asyncHandler(
     loginController,
@@ -66,6 +73,7 @@ authRouter.post(
 
   verifyRequestOrigin,
   refreshLimiter,
+  resolveApplication,
 
   asyncHandler(
     refreshController,
@@ -76,6 +84,7 @@ authRouter.post(
   "/logout",
 
   verifyRequestOrigin,
+  resolveApplication,
 
   asyncHandler(
     logoutController,
@@ -98,12 +107,16 @@ authRouter.get(
   "/oauth/google",
 
   oauthLimiter,
+  resolveApplicationFromRedirect,
 
   asyncHandler(
     googleStartController,
   ),
 );
 
+// No resolver: the provider redirects the browser here, so no API key can
+// be presented. The application id is recovered from the signed OAuth
+// state cookie instead.
 authRouter.get(
   "/oauth/google/callback",
 
@@ -120,12 +133,14 @@ authRouter.get(
   "/oauth/github",
 
   oauthLimiter,
+  resolveApplicationFromRedirect,
 
   asyncHandler(
     githubStartController,
   ),
 );
 
+// No resolver — see the Google callback note above.
 authRouter.get(
   "/oauth/github/callback",
 

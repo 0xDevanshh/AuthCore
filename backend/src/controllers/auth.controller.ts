@@ -37,6 +37,9 @@ function requestMetadata(
     userAgent:
       req.get("user-agent") ??
       null,
+
+    applicationId:
+      req.applicationId ?? null,
   };
 }
 

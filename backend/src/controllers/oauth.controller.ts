@@ -33,8 +33,13 @@ import {
   loginWithOAuth,
 } from "../services/oauth.service.ts";
 
+import {
+  requireApplicationId,
+} from "../middleware/resolveApplication.middleware.ts";
+
 function requestMetadata(
   req: Request,
+  applicationId: string,
 ) {
   return {
     ipAddress:
@@ -43,6 +48,8 @@ function requestMetadata(
     userAgent:
       req.get("user-agent") ??
       null,
+
+    applicationId,
   };
 }
 
@@ -69,11 +76,14 @@ function oauthSuccessUrl() {
 }
 
 export async function googleStartController(
-  _req: Request,
+  req: Request,
   res: Response,
 ) {
   const oauth =
-    createOAuthState("GOOGLE");
+    createOAuthState(
+      "GOOGLE",
+      requireApplicationId(req),
+    );
 
   setOAuthStateCookie(
     res,
@@ -152,7 +162,10 @@ export async function googleCallbackController(
     const result =
       await loginWithOAuth(
         identity,
-        requestMetadata(req),
+        requestMetadata(
+          req,
+          stored.applicationId,
+        ),
       );
 
     clearOAuthStateCookie(res);
@@ -183,11 +196,14 @@ export async function googleCallbackController(
 }
 
 export async function githubStartController(
-  _req: Request,
+  req: Request,
   res: Response,
 ) {
   const oauth =
-    createOAuthState("GITHUB");
+    createOAuthState(
+      "GITHUB",
+      requireApplicationId(req),
+    );
 
   setOAuthStateCookie(
     res,
@@ -262,7 +278,10 @@ export async function githubCallbackController(
     const result =
       await loginWithOAuth(
         identity,
-        requestMetadata(req),
+        requestMetadata(
+          req,
+          stored.applicationId,
+        ),
       );
 
     clearOAuthStateCookie(res);

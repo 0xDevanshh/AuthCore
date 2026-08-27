@@ -12,6 +12,13 @@ declare global {
                 | string
                 | null;
             };
+
+            /**
+             * Application resolved from the X-AuthCore-Key header by
+             * resolveApplication. Present only on end-user auth routes;
+             * control-plane routes authenticate with req.auth instead.
+             */
+            applicationId?: string;
         }
     }
 }

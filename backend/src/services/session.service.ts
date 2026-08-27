@@ -23,6 +23,12 @@ import {
 interface SessionMetadata {
   ipAddress?: string | null;
   userAgent?: string | null;
+
+  /**
+   * Application the request arrived through, resolved from the API key.
+   * Null only for sessions created outside an application context.
+   */
+  applicationId?: string | null;
 }
 
 export interface AuthTokens {
@@ -62,6 +68,10 @@ export async function createSession(
           await tx.session.create({
             data: {
               userId,
+
+              applicationId:
+                metadata.applicationId ??
+                null,
 
               ipAddress:
                 metadata.ipAddress ??
@@ -108,7 +118,8 @@ export async function createSession(
     signAccessToken({
       userId,
       sessionId: session.id,
-      applicationId: null,
+      applicationId:
+        session.applicationId,
     });
 
   return {

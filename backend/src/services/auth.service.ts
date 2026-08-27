@@ -23,7 +23,33 @@ import type {
 interface SessionMetadata {
   ipAddress?: string | null;
   userAgent?: string | null;
+
+  applicationId?: string | null;
 }
+
+/**
+ * NOTE — identity is GLOBAL, not per-application.
+ *
+ * The schema does not make this obvious, so stating it explicitly rather
+ * than guessing: `User` has no `applicationId` column, and `UserEmail`
+ * declares `email` and `normalized` as plain `@unique` — not
+ * `@@unique([applicationId, normalized])`. `User.username` is globally
+ * unique too. An application is linked to a user only through
+ * `Membership`.
+ *
+ * Consequences of the schema as written:
+ *   - One email address means one User row across the entire platform.
+ *   - A person signing up to App A and App B with the same email gets a
+ *     single shared User, and App B's signup collides with App A's.
+ *   - Therefore user lookups here are deliberately NOT scoped by
+ *     applicationId. Adding `where: { applicationId }` to these queries
+ *     would silently match nothing, since the column does not exist.
+ *
+ * If tenants are meant to have isolated user pools, that is a schema
+ * change (move the unique constraint onto
+ * `@@unique([applicationId, normalized])`) plus a migration — not a query
+ * change. Flagged for a decision before this is built on further.
+ */
 
 export async function getSafeUser(
   userId: string,

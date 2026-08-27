@@ -21,6 +21,8 @@ import type {
 interface SessionMetadata {
   ipAddress?: string | null;
   userAgent?: string | null;
+
+  applicationId?: string | null;
 }
 
 function providerEnum(
