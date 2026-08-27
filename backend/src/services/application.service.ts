@@ -1,8 +1,12 @@
+import { timingSafeEqual } from "node:crypto";
+
 import {
+  ApiKeyType,
   ApplicationStatus,
   AuditActorType,
   MemberStatus,
   Prisma,
+  type ApiKey,
   type Application,
 } from "@prisma/client";
 
@@ -14,6 +18,13 @@ import {
   randomSlugSuffix,
   slugify,
 } from "../utils/slug.ts";
+
+import {
+  API_KEY_LABEL,
+  apiKeyPrefixOf,
+  generateApiKey,
+  hashOpaqueToken,
+} from "../utils/token.ts";
 
 import { logAuditEvent } from "./audit.service.ts";
 
@@ -243,4 +254,218 @@ export async function getApplicationForUser(
   }
 
   return application;
+}
+
+interface CreateApiKeyOptions {
+  name?: string;
+  expiresAt?: Date | null;
+
+  ipAddress?: string | null;
+  userAgent?: string | null;
+}
+
+const DEFAULT_API_KEY_NAME = "Secret key";
+
+/**
+ * Mints a secret API key for an application.
+ *
+ * The raw key exists only in this function's return value. Callers get one
+ * chance to show it to the user; nothing can recover it afterwards, because
+ * only its HMAC and prefix are persisted.
+ */
+export async function createApiKey(
+  applicationId: string,
+  requestedBy: string,
+  options: CreateApiKeyOptions = {},
+): Promise<{ apiKey: ApiKey; rawKey: string }> {
+  const generated = generateApiKey();
+
+  const apiKey = await prisma.$transaction(async (tx) => {
+    const created = await tx.apiKey.create({
+      data: {
+        applicationId,
+        createdById: requestedBy,
+
+        name: options.name ?? DEFAULT_API_KEY_NAME,
+        type: ApiKeyType.SECRET,
+
+        prefix: generated.prefix,
+        keyHash: generated.hashedKey,
+
+        scopes: [],
+
+        expiresAt: options.expiresAt ?? null,
+      },
+    });
+
+    await logAuditEvent({
+      tx,
+
+      action: "APPLICATION_KEY_CREATED",
+      actorType: AuditActorType.USER,
+
+      applicationId,
+      userId: requestedBy,
+      apiKeyId: created.id,
+
+      resourceType: "ApiKey",
+      resourceId: created.id,
+
+      ipAddress: options.ipAddress ?? null,
+      userAgent: options.userAgent ?? null,
+
+      metadata: {
+        name: created.name,
+        prefix: created.prefix,
+      },
+    });
+
+    return created;
+  });
+
+  return {
+    apiKey,
+    rawKey: generated.rawKey,
+  };
+}
+
+/**
+ * Resolves a raw API key to its application.
+ *
+ * Looked up by the indexed plaintext `prefix` rather than by hash — the
+ * schema puts no unique constraint on `keyHash`, so a hash lookup would be
+ * a sequential scan. Candidates sharing a prefix are then compared in
+ * constant time.
+ */
+export async function verifyApiKey(
+  rawKey: string,
+): Promise<{ applicationId: string } | null> {
+  const candidateKey = rawKey.trim();
+
+  if (!candidateKey.startsWith(API_KEY_LABEL)) {
+    return null;
+  }
+
+  const expectedHash = Buffer.from(
+    hashOpaqueToken(candidateKey),
+    "hex",
+  );
+
+  const candidates = await prisma.apiKey.findMany({
+    where: {
+      prefix: apiKeyPrefixOf(candidateKey),
+      type: ApiKeyType.SECRET,
+
+      revokedAt: null,
+
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { gt: new Date() } },
+      ],
+
+      application: {
+        status: { not: ApplicationStatus.DELETED },
+      },
+    },
+
+    select: {
+      applicationId: true,
+      keyHash: true,
+    },
+  });
+
+  for (const candidate of candidates) {
+    if (!candidate.keyHash) {
+      continue;
+    }
+
+    const storedHash = Buffer.from(
+      candidate.keyHash,
+      "hex",
+    );
+
+    if (storedHash.length !== expectedHash.length) {
+      continue;
+    }
+
+    if (timingSafeEqual(storedHash, expectedHash)) {
+      return {
+        applicationId: candidate.applicationId,
+      };
+    }
+  }
+
+  return null;
+}
+
+export async function listApiKeys(
+  applicationId: string,
+): Promise<ApiKey[]> {
+  return prisma.apiKey.findMany({
+    where: { applicationId },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+/**
+ * Revokes a key by stamping `revokedAt`. The row is kept so audit entries
+ * referencing it stay resolvable.
+ *
+ * Idempotent: revoking an already-revoked key returns it unchanged rather
+ * than moving the original revocation timestamp.
+ */
+export async function revokeApiKey(
+  applicationId: string,
+  keyId: string,
+  requestedBy: string,
+  metadata: {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  } = {},
+): Promise<ApiKey> {
+  const existing = await prisma.apiKey.findFirst({
+    where: {
+      id: keyId,
+      applicationId,
+    },
+  });
+
+  if (!existing) {
+    throw new AppError(404, "API key not found");
+  }
+
+  if (existing.revokedAt) {
+    return existing;
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const revoked = await tx.apiKey.update({
+      where: { id: existing.id },
+      data: { revokedAt: new Date() },
+    });
+
+    await logAuditEvent({
+      tx,
+
+      action: "APPLICATION_KEY_REVOKED",
+      actorType: AuditActorType.USER,
+
+      applicationId,
+      userId: requestedBy,
+      apiKeyId: revoked.id,
+
+      resourceType: "ApiKey",
+      resourceId: revoked.id,
+
+      ipAddress: metadata.ipAddress ?? null,
+      userAgent: metadata.userAgent ?? null,
+
+      metadata: {
+        name: revoked.name,
+        prefix: revoked.prefix,
+      },
+    });
+
+    return revoked;
+  });
 }

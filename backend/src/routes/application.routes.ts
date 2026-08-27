@@ -12,6 +12,8 @@ import { requireAuth } from "../middleware/auth.middleware.ts";
 
 import { verifyRequestOrigin } from "../middleware/origin.middleware.ts";
 
+import { apiKeyRouter } from "./api-key.routes.ts";
+
 export const applicationRouter = Router();
 
 // Control plane: every route here is the developer's dashboard session,
@@ -37,4 +39,10 @@ applicationRouter.get(
   "/:id",
 
   asyncHandler(getApplicationController),
+);
+
+// Inherits requireAuth + verifyRequestOrigin from this router.
+applicationRouter.use(
+  "/:id/keys",
+  apiKeyRouter,
 );

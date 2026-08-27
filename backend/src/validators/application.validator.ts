@@ -15,3 +15,29 @@ export const applicationIdParamSchema = z.object({
 export type CreateApplicationInput = z.infer<
   typeof createApplicationSchema
 >;
+
+export const createApiKeySchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Key name cannot be empty")
+    .max(80, "Key name cannot exceed 80 characters")
+    .optional(),
+
+  expiresAt: z.coerce
+    .date()
+    .refine(
+      (value) => value.getTime() > Date.now(),
+      "Expiry must be in the future",
+    )
+    .optional(),
+});
+
+export const apiKeyIdParamSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  keyId: z.string().trim().min(1).max(64),
+});
+
+export type CreateApiKeyInput = z.infer<
+  typeof createApiKeySchema
+>;
