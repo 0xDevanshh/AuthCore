@@ -17,6 +17,7 @@ export const PERMISSIONS = {
   APIKEY_REVOKE: "apikey:revoke",
   APIKEY_LIST: "apikey:list",
 
+  MEMBER_LIST: "member:list",
   MEMBER_INVITE: "member:invite",
   MEMBER_REMOVE: "member:remove",
   MEMBER_ROLE_UPDATE: "member:role_update",
@@ -46,6 +47,8 @@ export const PERMISSION_DESCRIPTIONS: Record<
   [PERMISSIONS.APIKEY_LIST]:
     "List API keys.",
 
+  [PERMISSIONS.MEMBER_LIST]:
+    "View the members of the application.",
   [PERMISSIONS.MEMBER_INVITE]:
     "Invite members to the application.",
   [PERMISSIONS.MEMBER_REMOVE]:

@@ -26,6 +26,8 @@ import {
   hashOpaqueToken,
 } from "../utils/token.ts";
 
+import { ROLE_NAMES } from "../constants/roles.ts";
+
 import {
   ADMIN_PERMISSIONS,
   ALL_PERMISSIONS,
@@ -57,23 +59,23 @@ const DEFAULT_ROLES: readonly {
   permissions: readonly PermissionKey[];
 }[] = [
   {
-    name: "Owner",
+    name: ROLE_NAMES.OWNER,
     description: "Full control over the application, including deletion.",
     permissions: OWNER_PERMISSIONS,
   },
   {
-    name: "Admin",
+    name: ROLE_NAMES.ADMIN,
     description: "Manage members, roles, and application settings.",
     permissions: ADMIN_PERMISSIONS,
   },
   {
-    name: "Member",
+    name: ROLE_NAMES.MEMBER,
     description: "Standard access to the application.",
     permissions: MEMBER_PERMISSIONS,
   },
 ];
 
-const OWNER_ROLE_NAME = "Owner";
+const OWNER_ROLE_NAME = ROLE_NAMES.OWNER;
 
 const SLUG_FALLBACK = "app";
 

@@ -41,3 +41,16 @@ export const apiKeyIdParamSchema = z.object({
 export type CreateApiKeyInput = z.infer<
   typeof createApiKeySchema
 >;
+
+export const membershipIdParamSchema = z.object({
+  id: z.string().trim().min(1).max(64),
+  membershipId: z.string().trim().min(1).max(64),
+});
+
+export const updateMemberRoleSchema = z.object({
+  roleId: z.string().trim().min(1).max(64),
+});
+
+export type UpdateMemberRoleInput = z.infer<
+  typeof updateMemberRoleSchema
+>;
