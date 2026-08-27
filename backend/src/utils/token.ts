@@ -20,6 +20,29 @@ export function hashOpaqueToken(
     .digest("hex");
 }
 
+export interface GeneratedOneTimeToken {
+  rawToken: string;
+  hashedToken: string;
+}
+
+/**
+ * Mints a single-use token for out-of-band flows — invitations today,
+ * email verification and password reset later.
+ *
+ * Same construction as refresh tokens and API keys: an opaque random
+ * secret, of which only the HMAC-SHA256 hash is ever stored.
+ */
+export function generateOneTimeToken(): GeneratedOneTimeToken {
+  const rawToken = generateOpaqueToken();
+
+  return {
+    rawToken,
+
+    hashedToken:
+      hashOpaqueToken(rawToken),
+  };
+}
+
 const BASE62_ALPHABET =
   "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 

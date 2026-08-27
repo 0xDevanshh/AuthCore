@@ -40,6 +40,12 @@ const envSchema = z.object({
   GITHUB_CLIENT_SECRET: z.string().min(1),
   GITHUB_CALLBACK_URL: z.string().url(),
 
+  INVITATION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(604800), // 7 days
+
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
 });
 

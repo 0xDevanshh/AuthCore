@@ -54,3 +54,17 @@ export const updateMemberRoleSchema = z.object({
 export type UpdateMemberRoleInput = z.infer<
   typeof updateMemberRoleSchema
 >;
+
+export const sendInvitationSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .email("Enter a valid email address")
+    .transform((value) => value.toLowerCase()),
+
+  roleId: z.string().trim().min(1).max(64),
+});
+
+export type SendInvitationInput = z.infer<
+  typeof sendInvitationSchema
+>;

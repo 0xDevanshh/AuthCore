@@ -16,6 +16,8 @@ import { apiKeyRouter } from "./api-key.routes.ts";
 
 import { memberRouter } from "./member.routes.ts";
 
+import { invitationRouter } from "./invitation.routes.ts";
+
 export const applicationRouter = Router();
 
 // Control plane: every route here is the developer's dashboard session,
@@ -53,4 +55,9 @@ applicationRouter.use(
 applicationRouter.use(
   "/:id/members",
   memberRouter,
+);
+
+applicationRouter.use(
+  "/:id/invitations",
+  invitationRouter,
 );
