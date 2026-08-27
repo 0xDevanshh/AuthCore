@@ -9,6 +9,10 @@ import {
 } from "./auth.routes.ts";
 
 import {
+  applicationRouter,
+} from "./application.routes.ts";
+
+import {
   asyncHandler,
 } from "../utils/async-handler.ts";
 
@@ -40,4 +44,9 @@ router.get(
 router.use(
   "/auth",
   authRouter,
+);
+
+router.use(
+  "/applications",
+  applicationRouter,
 );
