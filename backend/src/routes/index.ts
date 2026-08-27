@@ -13,6 +13,10 @@ import {
 } from "./application.routes.ts";
 
 import {
+  invitationAcceptRouter,
+} from "./invitation-accept.routes.ts";
+
+import {
   asyncHandler,
 } from "../utils/async-handler.ts";
 
@@ -49,4 +53,9 @@ router.use(
 router.use(
   "/applications",
   applicationRouter,
+);
+
+router.use(
+  "/invitations",
+  invitationAcceptRouter,
 );

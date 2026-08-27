@@ -159,6 +159,7 @@ model Role {
 
   permissions RolePermission[]
   members     MembershipRole[]
+  invitations Invitation[]
 
   @@unique([applicationId, name])
   @@index([applicationId])
@@ -426,6 +427,8 @@ model Invitation {
   id            String    @id @default(cuid())
   applicationId String
   email         String
+  roleId        String
+  invitedBy     String
   tokenHash     String    @unique
   expiresAt     DateTime
   acceptedAt    DateTime?
@@ -433,8 +436,10 @@ model Invitation {
   createdAt     DateTime  @default(now())
 
   application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  role        Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@index([applicationId])
   @@index([email])
   @@index([expiresAt])
+  @@index([roleId])
 }
