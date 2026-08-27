@@ -19,6 +19,23 @@ declare global {
              * control-plane routes authenticate with req.auth instead.
              */
             applicationId?: string;
+
+            /**
+             * Membership resolved by requirePermission, with the caller's
+             * roles and the union of their permissions already computed.
+             * Present only on control-plane routes behind that middleware.
+             */
+            membership?: {
+                id: string;
+
+                applicationId: string;
+
+                userId: string;
+
+                roleIds: string[];
+
+                permissions: string[];
+            };
         }
     }
 }

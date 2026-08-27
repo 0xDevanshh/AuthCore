@@ -54,8 +54,10 @@ export async function createApiKeyController(
   const params = applicationIdParamSchema.parse(req.params);
   const input = createApiKeySchema.parse(req.body ?? {});
 
-  // Authorization: any active member may mint a key for now.
-  // TODO(rbac): restrict to the Owner and Admin roles once role checks land.
+  // Permission enforced upstream by requirePermission(APIKEY_CREATE).
+  // This call still resolves the application and re-checks membership,
+  // which keeps the 404-for-unknown-id behaviour and is cheap insurance
+  // against the route ever being mounted without the middleware.
   const application = await getApplicationForUser(
     params.id,
     auth.userId,
@@ -100,7 +102,7 @@ export async function listApiKeysController(
 
   const params = applicationIdParamSchema.parse(req.params);
 
-  // TODO(rbac): restrict to the Owner and Admin roles once role checks land.
+  // Permission enforced upstream by requirePermission(APIKEY_LIST).
   const application = await getApplicationForUser(
     params.id,
     auth.userId,
@@ -125,7 +127,7 @@ export async function revokeApiKeyController(
 
   const params = apiKeyIdParamSchema.parse(req.params);
 
-  // TODO(rbac): restrict to the Owner and Admin roles once role checks land.
+  // Permission enforced upstream by requirePermission(APIKEY_REVOKE).
   const application = await getApplicationForUser(
     params.id,
     auth.userId,
