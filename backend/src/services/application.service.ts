@@ -26,6 +26,15 @@ import {
   hashOpaqueToken,
 } from "../utils/token.ts";
 
+import {
+  ADMIN_PERMISSIONS,
+  ALL_PERMISSIONS,
+  MEMBER_PERMISSIONS,
+  OWNER_PERMISSIONS,
+  PERMISSION_DESCRIPTIONS,
+  type PermissionKey,
+} from "../constants/permissions.ts";
+
 import { logAuditEvent } from "./audit.service.ts";
 
 interface CreateApplicationParams {
@@ -38,26 +47,33 @@ interface CreateApplicationParams {
 }
 
 /**
- * Roles seeded with every new application. Permissions are attached in the
- * RBAC phase — these are name-only placeholders flagged as system roles so
- * later role editing can refuse to delete them.
+ * Roles seeded with every new application, and the permissions each one
+ * receives. Flagged as system roles so later role editing can refuse to
+ * delete them.
  */
-const DEFAULT_ROLES = [
+const DEFAULT_ROLES: readonly {
+  name: string;
+  description: string;
+  permissions: readonly PermissionKey[];
+}[] = [
   {
     name: "Owner",
     description: "Full control over the application, including deletion.",
+    permissions: OWNER_PERMISSIONS,
   },
   {
     name: "Admin",
     description: "Manage members, roles, and application settings.",
+    permissions: ADMIN_PERMISSIONS,
   },
   {
     name: "Member",
     description: "Standard access to the application.",
+    permissions: MEMBER_PERMISSIONS,
   },
-] as const;
+];
 
-const OWNER_ROLE_NAME = DEFAULT_ROLES[0].name;
+const OWNER_ROLE_NAME = "Owner";
 
 const SLUG_FALLBACK = "app";
 
@@ -111,15 +127,73 @@ async function createApplicationOnce(
       })),
     });
 
-    const ownerRole = await tx.role.findUniqueOrThrow({
-      where: {
-        applicationId_name: {
-          applicationId: application.id,
-          name: OWNER_ROLE_NAME,
-        },
-      },
-      select: { id: true },
+    // Permission rows are per-application (@@unique([applicationId, key])),
+    // so each application gets its own copy of the catalog.
+    await tx.permission.createMany({
+      data: ALL_PERMISSIONS.map((key) => ({
+        applicationId: application.id,
+        key,
+        description: PERMISSION_DESCRIPTIONS[key],
+      })),
     });
+
+    // createMany does not return rows; read the ids back to build the joins.
+    const [roles, permissions] = [
+      await tx.role.findMany({
+        where: { applicationId: application.id },
+        select: { id: true, name: true },
+      }),
+
+      await tx.permission.findMany({
+        where: { applicationId: application.id },
+        select: { id: true, key: true },
+      }),
+    ];
+
+    const roleIdByName = new Map(
+      roles.map((role) => [role.name, role.id]),
+    );
+
+    const permissionIdByKey = new Map(
+      permissions.map((permission) => [
+        permission.key,
+        permission.id,
+      ]),
+    );
+
+    const rolePermissions = DEFAULT_ROLES.flatMap((role) => {
+      const roleId = roleIdByName.get(role.name);
+
+      if (!roleId) {
+        throw new Error(
+          `Seeded role "${role.name}" was not found after creation`,
+        );
+      }
+
+      return role.permissions.map((key) => {
+        const permissionId = permissionIdByKey.get(key);
+
+        if (!permissionId) {
+          throw new Error(
+            `Seeded permission "${key}" was not found after creation`,
+          );
+        }
+
+        return { roleId, permissionId };
+      });
+    });
+
+    await tx.rolePermission.createMany({
+      data: rolePermissions,
+    });
+
+    const ownerRoleId = roleIdByName.get(OWNER_ROLE_NAME);
+
+    if (!ownerRoleId) {
+      throw new Error(
+        "Owner role was not found after creation",
+      );
+    }
 
     const membership = await tx.membership.create({
       data: {
@@ -132,7 +206,7 @@ async function createApplicationOnce(
     await tx.membershipRole.create({
       data: {
         membershipId: membership.id,
-        roleId: ownerRole.id,
+        roleId: ownerRoleId,
       },
     });
 
