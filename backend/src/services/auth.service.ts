@@ -21,8 +21,10 @@ import {
 
 import {
   buildEmailVerificationUrl,
-  sendEmailVerificationEmail,
+  sendVerificationEmail,
 } from "../utils/email.ts";
+
+import { logger } from "../config/logger.ts";
 
 // Lives in user.service.ts so verification.service.ts can return the same
 // /me shape without a circular import; re-exported here because callers
@@ -91,6 +93,9 @@ interface SignupMetadata {
  * which features — is a product decision, deliberately left for a later
  * phase; this only guarantees the address starts unverified and a live
  * token exists for it.
+ *
+ * Returns `emailSent` alongside the user so the caller can tell whether
+ * the verification link actually went out — see the send below.
  */
 export async function signup(
   input: SignupInput,
@@ -194,19 +199,57 @@ export async function signup(
         },
       );
 
-    // After commit — see the TODO(email) in utils/email.ts. No transport
-    // exists yet, so this logs the link outside production instead of
-    // sending it, matching the invitation flow.
-    sendEmailVerificationEmail({
-      to: normalizedEmail,
+    // Sent after commit, not inside the transaction: an email cannot be
+    // rolled back, so a send that succeeded followed by a transaction
+    // that failed would leave a live link to an account that does not
+    // exist.
+    //
+    // DELIBERATE — a failed send does NOT fail signup.
+    //
+    // The account and its verification token are already committed, and
+    // Prompt 5.3's resend endpoint can mint a fresh link at any time. So
+    // the only thing a rejected send costs is one email, whereas throwing
+    // here would return 500 for an account that was in fact created —
+    // leaving the user unable to sign up again (the address is taken) and
+    // unable to log in if verification is ever gated. Degrading beats
+    // that. `emailSent: false` tells the client to offer "resend".
+    //
+    // Do not "fix" this by rethrowing without also making signup roll the
+    // user back, which it deliberately does not.
+    let emailSent = true;
 
-      verifyUrl:
+    try {
+      await sendVerificationEmail(
+        normalizedEmail,
+
         buildEmailVerificationUrl(
           rawToken,
         ),
-    });
+      );
+    } catch (error) {
+      emailSent = false;
 
-    return getSafeUser(user.id);
+      // sendEmail already logged the transport failure; this records the
+      // consequence — which account is now sitting on an unsent link.
+      logger.error(
+        {
+          userId: user.id,
+          err:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        },
+        "Signup succeeded but verification email failed to send",
+      );
+    }
+
+    return {
+      user: await getSafeUser(
+        user.id,
+      ),
+
+      emailSent,
+    };
   } catch (error) {
     if (
       error instanceof

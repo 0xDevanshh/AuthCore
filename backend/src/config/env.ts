@@ -46,6 +46,12 @@ const envSchema = z.object({
     .positive()
     .default(604800), // 7 days
 
+  RESEND_API_KEY: z.string().min(1),
+
+  // Full RFC 5322 sender, e.g. "AuthCore <noreply@yourdomain.com>". The
+  // domain must be verified in Resend or every send is rejected.
+  EMAIL_FROM: z.string().min(1),
+
   // Deliberately shorter than INVITATION_TTL_SECONDS: a verification link
   // is mailed to an address the account is actively waiting on, so it is
   // acted on within minutes, and a shorter window narrows the exposure if

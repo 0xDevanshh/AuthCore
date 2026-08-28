@@ -59,7 +59,7 @@ export async function signupController(
   const input =
     signupSchema.parse(req.body);
 
-  const user =
+  const result =
     await signup(input, {
       applicationId:
         requireApplicationId(req),
@@ -72,14 +72,21 @@ export async function signupController(
         null,
     });
 
+  // Still 201 when the email failed — the account exists either way. The
+  // message and `emailSent` are what tell the client to surface a resend
+  // prompt. See the comment on the send in auth.service.ts.
   res.status(201).json({
     success: true,
 
-    message:
-      "Account created successfully",
+    message: result.emailSent
+      ? "Account created successfully"
+      : "Account created, but the verification email could not be sent. You can request a new one.",
 
     data: {
-      user,
+      user: result.user,
+
+      emailSent:
+        result.emailSent,
     },
   });
 }
