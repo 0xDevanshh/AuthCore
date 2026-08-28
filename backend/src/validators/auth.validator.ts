@@ -74,8 +74,16 @@ export const verifyEmailSchema = z.object({
     .max(512),
 });
 
+export const resendVerificationSchema =
+  z.object({
+    email: emailSchema,
+  });
+
 export type SignupInput =
   z.infer<typeof signupSchema>;
+
+export type ResendVerificationInput =
+  z.infer<typeof resendVerificationSchema>;
 
 export type VerifyEmailInput =
   z.infer<typeof verifyEmailSchema>;

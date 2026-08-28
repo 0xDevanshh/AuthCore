@@ -6,6 +6,12 @@ import {
 
 import { prisma } from "../config/prisma.ts";
 import { env } from "../config/env.ts";
+import { logger } from "../config/logger.ts";
+
+import {
+  buildEmailVerificationUrl,
+  sendVerificationEmail,
+} from "../utils/email.ts";
 
 import { AppError } from "../utils/app-error.ts";
 
@@ -163,6 +169,128 @@ export async function createEmailVerificationToken(
   }
 
   return { rawToken: token.rawToken };
+}
+
+/**
+ * Issues a fresh verification link for an address whose original expired
+ * or never arrived.
+ *
+ * ALWAYS resolves, and always the same way. Whether the address is unknown,
+ * already verified, or genuinely resent, the caller sees nothing that
+ * distinguishes the cases — this endpoint is public, so any variation in
+ * the response would turn it into an account-existence oracle. That is
+ * also why nothing here throws AppError for a miss: there is no "not
+ * found" to report.
+ *
+ * LOOKUP IS NOT SCOPED BY applicationId, and cannot be. Identity is global
+ * in this schema — `UserEmail.normalized` is a plain `@unique`, not
+ * `@@unique([applicationId, normalized])`, and `User` has no application
+ * column (see the note in auth.service.ts). Adding `where: {
+ * applicationId }` here would match nothing, since the column does not
+ * exist. The applicationId still scopes what it can: it is stamped on the
+ * new OneTimeToken and on the audit entry.
+ *
+ * KNOWN GAP — timing. The unknown-address path skips a token write and an
+ * email send, so it answers measurably faster than the resent path. The
+ * response body leaks nothing, but the latency does, to anyone who cares
+ * to measure. Closing it means queueing the work behind a fixed-delay
+ * response or a background job; both are real changes and neither belongs
+ * in this endpoint alone, since login has the same shape.
+ */
+export async function resendVerification(
+  applicationId: string,
+  email: string,
+  metadata: {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  } = {},
+): Promise<void> {
+  const normalizedEmail = email
+    .trim()
+    .toLowerCase();
+
+  const userEmail =
+    await prisma.userEmail.findUnique({
+      where: { normalized: normalizedEmail },
+
+      select: {
+        id: true,
+        email: true,
+        userId: true,
+        verifiedAt: true,
+
+        user: {
+          select: { disabledAt: true },
+        },
+      },
+    });
+
+  // No account, already verified, or disabled — nothing to send. Returns
+  // exactly as the success path does.
+  if (
+    !userEmail ||
+    userEmail.verifiedAt ||
+    userEmail.user.disabledAt
+  ) {
+    return;
+  }
+
+  // Invalidates the previous live token before minting this one, so the
+  // older link stops working the moment a new one is issued — see
+  // createEmailVerificationToken.
+  const { rawToken } =
+    await createEmailVerificationToken(
+      userEmail.userId,
+      applicationId,
+
+      {
+        target: normalizedEmail,
+
+        ipAddress: metadata.ipAddress ?? null,
+        userAgent: metadata.userAgent ?? null,
+      },
+    );
+
+  try {
+    await sendVerificationEmail(
+      userEmail.email,
+
+      buildEmailVerificationUrl(rawToken),
+    );
+  } catch (error) {
+    // Swallowed for the same reason signup swallows it, plus one specific
+    // to this endpoint: surfacing a send failure here would answer "does
+    // this address exist?" — only a real account ever reaches a send.
+    // sendEmail has already logged the transport error.
+    logger.error(
+      {
+        userId: userEmail.userId,
+        err:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      },
+      "Verification email resend failed to send",
+    );
+
+    return;
+  }
+
+  await logAuditEvent({
+    action: "EMAIL_VERIFICATION_RESENT",
+    actorType: AuditActorType.USER,
+
+    applicationId,
+    userId: userEmail.userId,
+
+    resourceType: "UserEmail",
+    resourceId: userEmail.id,
+
+    ipAddress: metadata.ipAddress ?? null,
+    userAgent: metadata.userAgent ?? null,
+
+    metadata: { email: userEmail.email },
+  });
 }
 
 const SERIALIZABLE = {

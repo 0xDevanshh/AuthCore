@@ -7,6 +7,7 @@ import {
   logoutController,
   meController,
   refreshController,
+  resendVerificationController,
   signupController,
   verifyEmailController,
 } from "../controllers/auth.controller.ts";
@@ -34,6 +35,8 @@ import {
   loginLimiter,
   oauthLimiter,
   refreshLimiter,
+  resendVerificationEmailLimiter,
+  resendVerificationIpLimiter,
   signupLimiter,
   verifyEmailLimiter,
 } from "../middleware/rate-limit.middleware.ts";
@@ -83,6 +86,26 @@ authRouter.post(
 
   asyncHandler(
     verifyEmailController,
+  ),
+);
+
+// Public, like /verify-email: someone whose link expired has no session to
+// authenticate with. resolveApplication still applies.
+//
+// Middleware order is load-bearing. The IP limiter runs first so a flood
+// is dropped before it costs an API-key lookup; resolveApplication runs
+// before the per-address limiter, whose key includes the resolved
+// application id.
+authRouter.post(
+  "/resend-verification",
+
+  verifyRequestOrigin,
+  resendVerificationIpLimiter,
+  resolveApplication,
+  resendVerificationEmailLimiter,
+
+  asyncHandler(
+    resendVerificationController,
   ),
 );
 

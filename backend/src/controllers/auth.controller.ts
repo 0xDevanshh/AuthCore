@@ -5,11 +5,13 @@ import type {
 
 import {
   loginSchema,
+  resendVerificationSchema,
   signupSchema,
   verifyEmailSchema,
 } from "../validators/auth.validator.ts";
 
 import {
+  resendVerification,
   verifyEmail,
 } from "../services/verification.service.ts";
 
@@ -130,6 +132,47 @@ export async function verifyEmailController(
     data: {
       user,
     },
+  });
+}
+
+/**
+ * ONE RESPONSE, ALWAYS.
+ *
+ * This body is returned whether the address is unknown, already verified,
+ * or genuinely resent — and `resendVerification` never throws, so there is
+ * no error branch that could differ either. Do not add one: any variation
+ * here (a 404, a different message, a count) tells an unauthenticated
+ * caller which addresses hold accounts.
+ */
+export async function resendVerificationController(
+  req: Request,
+  res: Response,
+) {
+  const input =
+    resendVerificationSchema.parse(
+      req.body,
+    );
+
+  await resendVerification(
+    requireApplicationId(req),
+
+    input.email,
+
+    {
+      ipAddress:
+        req.ip ?? null,
+
+      userAgent:
+        req.get("user-agent") ??
+        null,
+    },
+  );
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      "If an account exists for that address, a verification email has been sent.",
   });
 }
 
