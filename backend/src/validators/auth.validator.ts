@@ -64,8 +64,21 @@ export const loginSchema = z.object({
     .max(128),
 });
 
+export const verifyEmailSchema = z.object({
+  // Base64url of 48 random bytes — 64 characters. Bounded so a huge body
+  // is rejected before it reaches an HMAC.
+  token: z
+    .string()
+    .trim()
+    .min(1, "Verification token is required")
+    .max(512),
+});
+
 export type SignupInput =
   z.infer<typeof signupSchema>;
+
+export type VerifyEmailInput =
+  z.infer<typeof verifyEmailSchema>;
 
 export type LoginInput =
   z.infer<typeof loginSchema>;

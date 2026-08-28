@@ -6,7 +6,12 @@ import type {
 import {
   loginSchema,
   signupSchema,
+  verifyEmailSchema,
 } from "../validators/auth.validator.ts";
+
+import {
+  verifyEmail,
+} from "../services/verification.service.ts";
 
 import {
   getSafeUser,
@@ -72,6 +77,48 @@ export async function signupController(
 
     message:
       "Account created successfully",
+
+    data: {
+      user,
+    },
+  });
+}
+
+/**
+ * Public by design — the user arrives from a mail client and may hold no
+ * session, so requireAuth would make the link unusable for exactly the
+ * people it is sent to. The token is the credential.
+ */
+export async function verifyEmailController(
+  req: Request,
+  res: Response,
+) {
+  const input =
+    verifyEmailSchema.parse(
+      req.body,
+    );
+
+  const user =
+    await verifyEmail(
+      input.token,
+
+      requireApplicationId(req),
+
+      {
+        ipAddress:
+          req.ip ?? null,
+
+        userAgent:
+          req.get("user-agent") ??
+          null,
+      },
+    );
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      "Email verified successfully",
 
     data: {
       user,

@@ -51,6 +51,26 @@ export const refreshLimiter =
     max: 50,
   });
 
+// The token is the only credential this route checks, so the endpoint is
+// an unauthenticated guessing surface. 64 base64url characters is far out
+// of brute-force reach, but the limit keeps the attempt volume bounded.
+export const verifyEmailLimiter =
+  rateLimit({
+    ...commonOptions,
+
+    windowMs:
+      15 * 60 * 1000,
+
+    max: 10,
+
+    message: {
+      success: false,
+
+      message:
+        "Too many verification attempts. Try again later.",
+    },
+  });
+
 export const oauthLimiter =
   rateLimit({
     ...commonOptions,

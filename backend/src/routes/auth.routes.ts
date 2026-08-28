@@ -8,6 +8,7 @@ import {
   meController,
   refreshController,
   signupController,
+  verifyEmailController,
 } from "../controllers/auth.controller.ts";
 
 import {
@@ -34,6 +35,7 @@ import {
   oauthLimiter,
   refreshLimiter,
   signupLimiter,
+  verifyEmailLimiter,
 } from "../middleware/rate-limit.middleware.ts";
 
 import {
@@ -65,6 +67,22 @@ authRouter.post(
 
   asyncHandler(
     loginController,
+  ),
+);
+
+// Public: no requireAuth, because the link is clicked from a mail client
+// where the user may hold no session. resolveApplication still applies —
+// this is a data-plane action and the audit entry is scoped to the
+// resolved application.
+authRouter.post(
+  "/verify-email",
+
+  verifyRequestOrigin,
+  verifyEmailLimiter,
+  resolveApplication,
+
+  asyncHandler(
+    verifyEmailController,
   ),
 );
 

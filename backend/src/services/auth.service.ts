@@ -24,6 +24,15 @@ import {
   sendEmailVerificationEmail,
 } from "../utils/email.ts";
 
+// Lives in user.service.ts so verification.service.ts can return the same
+// /me shape without a circular import; re-exported here because callers
+// (and the rest of this file) have always reached for it through
+// auth.service.
+import { getSafeUser } from "./user.service.ts";
+
+export { getSafeUser };
+export type { SafeUser } from "./user.service.ts";
+
 import type {
   LoginInput,
   SignupInput,
@@ -72,72 +81,6 @@ interface SignupMetadata {
  * `@@unique([applicationId, normalized])`) plus a migration — not a query
  * change. Flagged for a decision before this is built on further.
  */
-
-export async function getSafeUser(
-  userId: string,
-) {
-  const user =
-    await prisma.user.findUnique({
-      where: {
-        id: userId,
-      },
-
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        username: true,
-        avatarUrl: true,
-        createdAt: true,
-        disabledAt: true,
-
-        emails: {
-          where: {
-            isPrimary: true,
-          },
-
-          select: {
-            email: true,
-            verifiedAt: true,
-          },
-
-          take: 1,
-        },
-      },
-    });
-
-  if (!user) {
-    throw new AppError(
-      404,
-      "User not found",
-    );
-  }
-
-  const primaryEmail =
-    user.emails[0] ?? null;
-
-  return {
-    id: user.id,
-
-    firstName: user.firstName,
-    lastName: user.lastName,
-
-    username: user.username,
-
-    avatarUrl: user.avatarUrl,
-
-    email:
-      primaryEmail?.email ??
-      null,
-
-    emailVerified:
-      Boolean(
-        primaryEmail?.verifiedAt,
-      ),
-
-    createdAt: user.createdAt,
-  };
-}
 
 /**
  * Creates an account and mints its email-verification token.
