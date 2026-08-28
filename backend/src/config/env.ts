@@ -46,6 +46,16 @@ const envSchema = z.object({
     .positive()
     .default(604800), // 7 days
 
+  // Deliberately shorter than INVITATION_TTL_SECONDS: a verification link
+  // is mailed to an address the account is actively waiting on, so it is
+  // acted on within minutes, and a shorter window narrows the exposure if
+  // the mailbox is later compromised.
+  EMAIL_VERIFICATION_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(86400), // 24 hours
+
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
 });
 

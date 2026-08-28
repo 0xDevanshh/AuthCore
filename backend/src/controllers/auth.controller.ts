@@ -25,6 +25,10 @@ import {
   setAuthCookies,
 } from "../utils/cookies.ts";
 
+import {
+  requireApplicationId,
+} from "../middleware/resolveApplication.middleware.ts";
+
 import { AppError } from "../utils/app-error.ts";
 
 function requestMetadata(
@@ -51,7 +55,17 @@ export async function signupController(
     signupSchema.parse(req.body);
 
   const user =
-    await signup(input);
+    await signup(input, {
+      applicationId:
+        requireApplicationId(req),
+
+      ipAddress:
+        req.ip ?? null,
+
+      userAgent:
+        req.get("user-agent") ??
+        null,
+    });
 
   res.status(201).json({
     success: true,

@@ -15,6 +15,15 @@ import {
   createSession,
 } from "./session.service.ts";
 
+import {
+  createEmailVerificationToken,
+} from "./verification.service.ts";
+
+import {
+  buildEmailVerificationUrl,
+  sendEmailVerificationEmail,
+} from "../utils/email.ts";
+
 import type {
   LoginInput,
   SignupInput,
@@ -25,6 +34,19 @@ interface SessionMetadata {
   userAgent?: string | null;
 
   applicationId?: string | null;
+}
+
+/**
+ * Signup needs a definite applicationId, unlike login: the
+ * `OneTimeToken` row backing email verification carries a required
+ * `applicationId` FK. Every end-user auth route runs behind
+ * `resolveApplication`, so the controller always has one.
+ */
+interface SignupMetadata {
+  applicationId: string;
+
+  ipAddress?: string | null;
+  userAgent?: string | null;
 }
 
 /**
@@ -117,8 +139,19 @@ export async function getSafeUser(
   };
 }
 
+/**
+ * Creates an account and mints its email-verification token.
+ *
+ * NOT blocked on verification, by design: the new user's primary
+ * `UserEmail.verifiedAt` starts null and nothing in signup or login
+ * consults it yet. Whether unverified accounts are gated — and out of
+ * which features — is a product decision, deliberately left for a later
+ * phase; this only guarantees the address starts unverified and a live
+ * token exists for it.
+ */
 export async function signup(
   input: SignupInput,
+  metadata: SignupMetadata,
 ) {
   const normalizedEmail =
     input.email
@@ -151,7 +184,7 @@ export async function signup(
     );
 
   try {
-    const user =
+    const { user, rawToken } =
       await prisma.$transaction(
         async (tx) => {
           const createdUser =
@@ -180,13 +213,55 @@ export async function signup(
 
               isPrimary: true,
 
+              // Unverified until the token minted below is redeemed.
               verifiedAt: null,
             },
           });
 
-          return createdUser;
+          // Inside the transaction so an account can never be created
+          // without its verification token, or vice versa.
+          const verification =
+            await createEmailVerificationToken(
+              createdUser.id,
+
+              metadata.applicationId,
+
+              {
+                tx,
+
+                target:
+                  normalizedEmail,
+
+                ipAddress:
+                  metadata.ipAddress ??
+                  null,
+
+                userAgent:
+                  metadata.userAgent ??
+                  null,
+              },
+            );
+
+          return {
+            user: createdUser,
+
+            rawToken:
+              verification.rawToken,
+          };
         },
       );
+
+    // After commit — see the TODO(email) in utils/email.ts. No transport
+    // exists yet, so this logs the link outside production instead of
+    // sending it, matching the invitation flow.
+    sendEmailVerificationEmail({
+      to: normalizedEmail,
+
+      verifyUrl:
+        buildEmailVerificationUrl(
+          rawToken,
+        ),
+    });
 
     return getSafeUser(user.id);
   } catch (error) {

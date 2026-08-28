@@ -59,3 +59,52 @@ export function buildInvitationAcceptUrl(
 
   return url.toString();
 }
+
+export interface EmailVerificationEmail {
+  to: string;
+  verifyUrl: string;
+}
+
+/**
+ * Same stub treatment as invitations — see the TODO(email) above.
+ *
+ * Signup is deliberately not blocked on verification (that is a product
+ * decision for later), so an undelivered verification email degrades the
+ * account rather than locking the user out of it.
+ */
+export function sendEmailVerificationEmail(
+  email: EmailVerificationEmail,
+): void {
+  if (env.NODE_ENV === "production") {
+    logger.warn(
+      { to: email.to },
+      "Verification email not sent: no mail transport configured",
+    );
+
+    return;
+  }
+
+  logger.info(
+    {
+      to: email.to,
+      verifyUrl: email.verifyUrl,
+    },
+    "Email verification (stub — not actually sent)",
+  );
+}
+
+export function buildEmailVerificationUrl(
+  rawToken: string,
+): string {
+  const url = new URL(
+    "/verify-email",
+    env.FRONTEND_URL,
+  );
+
+  url.searchParams.set(
+    "token",
+    rawToken,
+  );
+
+  return url.toString();
+}
