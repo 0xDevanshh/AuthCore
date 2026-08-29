@@ -34,6 +34,10 @@ import {
 } from "../services/user.service.ts";
 
 import {
+  enrollTotp,
+} from "../services/mfa.service.ts";
+
+import {
   revokeSessionByRefreshToken,
   rotateRefreshToken,
 } from "../services/session.service.ts";
@@ -418,6 +422,68 @@ export async function changePasswordController(
 
     message:
       "Password changed successfully. Other devices have been signed out.",
+  });
+}
+
+/**
+ * requireAuth — a user setting up a second factor on their own account,
+ * authenticated by the session they already hold.
+ *
+ * The response body carries the TOTP secret, in the clear, twice over (the
+ * QR data URL encodes it too). That is unavoidable — enrollment does not
+ * work otherwise — but it means this response must never be cached or
+ * logged, hence the explicit no-store.
+ */
+export async function enrollTotpController(
+  req: Request,
+  res: Response,
+) {
+  if (!req.auth) {
+    throw new AppError(
+      401,
+      "Authentication required",
+    );
+  }
+
+  const enrollment =
+    await enrollTotp(
+      req.auth.userId,
+
+      {
+        applicationId:
+          req.auth.applicationId,
+
+        ipAddress:
+          req.ip ?? null,
+
+        userAgent:
+          req.get("user-agent") ??
+          null,
+      },
+    );
+
+  res.set(
+    "Cache-Control",
+    "no-store",
+  );
+
+  res.status(201).json({
+    success: true,
+
+    message:
+      "Scan the QR code with your authenticator app, then confirm a code to finish setup.",
+
+    data: {
+      secret:
+        enrollment.secret,
+
+      qrCodeDataUrl:
+        enrollment.qrCodeDataUrl,
+
+      // Explicit so the client does not present this as done. The method
+      // is inert until the confirmation step passes.
+      verified: false,
+    },
   });
 }
 

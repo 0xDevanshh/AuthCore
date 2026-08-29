@@ -4,6 +4,7 @@ import {
 
 import {
   changePasswordController,
+  enrollTotpController,
   forgotPasswordController,
   loginController,
   logoutController,
@@ -179,6 +180,22 @@ authRouter.post(
 
   asyncHandler(
     changePasswordController,
+  ),
+);
+
+// MFA enrollment. requireAuth only — the user is acting on their own
+// already-authenticated account, so the session is the credential.
+//
+// Nothing here affects login yet: the method it creates is unverified and
+// disabled, and no login path consults MfaMethod.
+authRouter.post(
+  "/mfa/totp/enroll",
+
+  verifyRequestOrigin,
+  requireAuth,
+
+  asyncHandler(
+    enrollTotpController,
   ),
 );
 
