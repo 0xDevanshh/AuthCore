@@ -37,7 +37,9 @@ import {
 
 import {
   completeMfaLogin,
+  countRemainingRecoveryCodes,
   enrollTotp,
+  generateRecoveryCodes,
   verifyTotpSetup,
 } from "../services/mfa.service.ts";
 
@@ -611,32 +613,128 @@ export async function verifyTotpSetupController(
       req.body,
     );
 
-  await verifyTotpSetup(
-    req.auth.userId,
+  const { recoveryCodes } =
+    await verifyTotpSetup(
+      req.auth.userId,
 
-    input.code,
+      input.code,
 
-    {
-      applicationId:
-        req.auth.applicationId,
+      {
+        applicationId:
+          req.auth.applicationId,
 
-      ipAddress:
-        req.ip ?? null,
+        ipAddress:
+          req.ip ?? null,
 
-      userAgent:
-        req.get("user-agent") ??
-        null,
-    },
+        userAgent:
+          req.get("user-agent") ??
+          null,
+      },
+    );
+
+  // Carries the recovery codes in the clear — the only time they exist in
+  // readable form.
+  res.set(
+    "Cache-Control",
+    "no-store",
   );
 
   res.status(200).json({
     success: true,
 
     message:
-      "Two-factor authentication is now enabled for your account.",
+      "Two-factor authentication is now enabled. Save your recovery codes now — they will not be shown again.",
 
     data: {
       verified: true,
+
+      recoveryCodes,
+
+      // Explicit so a client cannot treat this as a list it can re-fetch
+      // later. Only hashes are stored; there is nothing to re-fetch.
+      recoveryCodesShownOnce: true,
+    },
+  });
+}
+
+/**
+ * Replaces the user's recovery codes. requireAuth — a settings-page
+ * action, not a login-time one.
+ *
+ * Regenerating invalidates the previous set, so a client should confirm
+ * the intent before calling this: a user who regenerates and then closes
+ * the tab without saving has silently thrown away their only backup.
+ */
+export async function regenerateRecoveryCodesController(
+  req: Request,
+  res: Response,
+) {
+  if (!req.auth) {
+    throw new AppError(
+      401,
+      "Authentication required",
+    );
+  }
+
+  const recoveryCodes =
+    await generateRecoveryCodes(
+      req.auth.userId,
+
+      {
+        applicationId:
+          req.auth.applicationId,
+
+        ipAddress:
+          req.ip ?? null,
+
+        userAgent:
+          req.get("user-agent") ??
+          null,
+      },
+    );
+
+  res.set(
+    "Cache-Control",
+    "no-store",
+  );
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      "New recovery codes generated. Save them now — they will not be shown again, and your previous codes no longer work.",
+
+    data: {
+      recoveryCodes,
+      recoveryCodesShownOnce: true,
+    },
+  });
+}
+
+/**
+ * How many unused recovery codes remain. A number, never the codes.
+ */
+export async function recoveryCodesCountController(
+  req: Request,
+  res: Response,
+) {
+  if (!req.auth) {
+    throw new AppError(
+      401,
+      "Authentication required",
+    );
+  }
+
+  const remaining =
+    await countRemainingRecoveryCodes(
+      req.auth.userId,
+    );
+
+  res.status(200).json({
+    success: true,
+
+    data: {
+      remaining,
     },
   });
 }

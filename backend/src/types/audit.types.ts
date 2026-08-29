@@ -22,6 +22,11 @@ export type AuditAction =
   | "MFA_CHALLENGE_ISSUED"
   | "MFA_CHALLENGE_SUCCESS"
   | "MFA_CHALLENGE_FAILED"
+  | "MFA_RECOVERY_CODES_GENERATED"
+  // Worth alerting on, not just recording: a recovery code being spent
+  // usually means the user lost their authenticator device — or that
+  // someone else has their printout.
+  | "MFA_RECOVERY_CODE_USED"
   | "PASSWORD_CHANGED"
   | "PASSWORD_RESET_REQUESTED"
   | "PASSWORD_RESET_COMPLETED"

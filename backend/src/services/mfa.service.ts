@@ -1,8 +1,11 @@
 import {
   AuditActorType,
   MfaType,
+  Prisma,
   TokenPurpose,
 } from "@prisma/client";
+
+import { randomInt } from "node:crypto";
 
 import * as OTPAuth from "otpauth";
 
@@ -10,6 +13,7 @@ import QRCode from "qrcode";
 
 import { prisma } from "../config/prisma.ts";
 import { env } from "../config/env.ts";
+import { logger } from "../config/logger.ts";
 
 import { AppError } from "../utils/app-error.ts";
 
@@ -388,7 +392,7 @@ export async function verifyTotpSetup(
     ipAddress?: string | null;
     userAgent?: string | null;
   } = {},
-): Promise<void> {
+): Promise<{ recoveryCodes: string[] }> {
   // Authenticator apps and users both like to add spaces; the digits are
   // what matter.
   const submittedCode = code
@@ -436,7 +440,12 @@ export async function verifyTotpSetup(
 
   const now = new Date();
 
-  await prisma.$transaction(async (tx) => {
+  // Generated inside the same transaction that enables MFA, so the two
+  // commit or fail together. An account must never end up with a second
+  // factor switched on and no recovery path — that is precisely how a
+  // lost phone becomes a permanently locked account.
+  const recoveryCodes =
+    await prisma.$transaction(async (tx) => {
     // Guarded on verifiedAt: null, like every other one-shot transition
     // in this codebase — two concurrent confirmations must not both
     // count, and this is also what makes a second submission of the same
@@ -489,17 +498,21 @@ export async function verifyTotpSetup(
         clockDriftSteps: delta,
       },
     });
+
+    return generateRecoveryCodes(userId, {
+      applicationId:
+        options.applicationId ?? null,
+
+      ipAddress: options.ipAddress ?? null,
+      userAgent: options.userAgent ?? null,
+
+      tx,
+    });
   });
 
-  // TODO: generate recovery codes here once implemented.
-  //
-  // This matters more than a normal TODO. Until it is wired up, a user
-  // who completes this step and then loses their phone has NO way back
-  // into their account once 7.3 starts enforcing MFA at login — there is
-  // no second factor to fall back on and no self-service reset. The
-  // `MfaRecoveryCode` model already exists in the schema (userId,
-  // codeHash @unique, usedAt) and is unused. Wire this before enforcement
-  // ships, not merely before the phase is called done.
+  // Shown once, by the caller, and never retrievable again — only HMACs
+  // are stored.
+  return { recoveryCodes };
 }
 
 /**
@@ -528,6 +541,71 @@ function challengeExpiry(): Date {
 export interface MfaChallenge {
   challengeToken: string;
   expiresAt: Date;
+}
+
+/**
+ * Burns a challenge and records the success.
+ *
+ * Shared by both ways of passing the second factor — a TOTP code and a
+ * recovery code — so neither can end up skipping the consumption guard
+ * or the audit entry. `extra` carries whatever distinguishes the two in
+ * the audit metadata.
+ */
+async function consumeChallenge(
+  challengeId: string,
+  applicationId: string,
+  userId: string,
+  mfaMethodId: string,
+  metadata: {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  },
+  extra: Prisma.InputJsonObject,
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    // Guarded on usedAt: null, so two concurrent submissions of the same
+    // valid code cannot both open a session.
+    const consumed =
+      await tx.oneTimeToken.updateMany({
+        where: {
+          id: challengeId,
+          usedAt: null,
+        },
+
+        data: { usedAt: new Date() },
+      });
+
+    if (consumed.count !== 1) {
+      throw new AppError(
+        401,
+        "Invalid or expired MFA challenge. Please log in again.",
+        "MFA_CHALLENGE_INVALID",
+      );
+    }
+
+    await tx.mfaMethod.update({
+      where: { id: mfaMethodId },
+      data: { lastUsedAt: new Date() },
+    });
+
+    await logAuditEvent({
+      tx,
+
+      action: "MFA_CHALLENGE_SUCCESS",
+      actorType: AuditActorType.USER,
+
+      applicationId,
+      userId,
+
+      resourceType: "MfaMethod",
+      resourceId: mfaMethodId,
+
+      ipAddress: metadata.ipAddress ?? null,
+      userAgent: metadata.userAgent ?? null,
+
+      metadata: extra,
+    });
+  });
 }
 
 /**
@@ -698,6 +776,42 @@ export async function completeMfaLogin(
     totpCode,
   );
 
+  // Not a live TOTP code — try it as a recovery code before giving up.
+  // The endpoint accepts either transparently: a user reaching for a
+  // backup code is a user who cannot produce a TOTP one, and making them
+  // find a different form to type it into serves nothing.
+  //
+  // Ordering matters. TOTP is checked first because it is the common
+  // case, and because the formats do not overlap (6-8 digits vs.
+  // xxxx-xxxx over a letter-bearing alphabet), so no input can be
+  // ambiguous between them.
+  if (delta === null) {
+    const recovered = await useRecoveryCode(
+      challenge.userId,
+      totpCode,
+
+      {
+        applicationId,
+
+        ipAddress: metadata.ipAddress ?? null,
+        userAgent: metadata.userAgent ?? null,
+      },
+    );
+
+    if (recovered) {
+      await consumeChallenge(
+        challenge.id,
+        applicationId,
+        challenge.userId,
+        method.id,
+        metadata,
+        { viaRecoveryCode: true },
+      );
+
+      return { userId: challenge.userId };
+    }
+  }
+
   if (delta === null) {
     const counted =
       await prisma.oneTimeToken.update({
@@ -748,53 +862,17 @@ export async function completeMfaLogin(
     );
   }
 
-  await prisma.$transaction(async (tx) => {
-    // Guarded on usedAt: null, so two concurrent submissions of the same
-    // valid code cannot both open a session.
-    const consumed =
-      await tx.oneTimeToken.updateMany({
-        where: {
-          id: challenge.id,
-          usedAt: null,
-        },
-
-        data: { usedAt: new Date() },
-      });
-
-    if (consumed.count !== 1) {
-      throw new AppError(
-        401,
-        "Invalid or expired MFA challenge. Please log in again.",
-        "MFA_CHALLENGE_INVALID",
-      );
-    }
-
-    await tx.mfaMethod.update({
-      where: { id: method.id },
-      data: { lastUsedAt: new Date() },
-    });
-
-    await logAuditEvent({
-      tx,
-
-      action: "MFA_CHALLENGE_SUCCESS",
-      actorType: AuditActorType.USER,
-
-      applicationId,
-      userId: challenge.userId,
-
-      resourceType: "MfaMethod",
-      resourceId: method.id,
-
-      ipAddress: metadata.ipAddress ?? null,
-      userAgent: metadata.userAgent ?? null,
-
-      metadata: {
-        clockDriftSteps: delta,
-        attempts: challenge.attempts,
-      },
-    });
-  });
+  await consumeChallenge(
+    challenge.id,
+    applicationId,
+    challenge.userId,
+    method.id,
+    metadata,
+    {
+      clockDriftSteps: delta,
+      attempts: challenge.attempts,
+    },
+  );
 
   // The session itself is created by the caller, which owns that concern.
   // NOTE the small window this leaves: the challenge is consumed here, so
@@ -802,4 +880,321 @@ export async function completeMfaLogin(
   // to the alternative — a challenge that survives a partial failure and
   // can be replayed.
   return { userId: challenge.userId };
+}
+
+/**
+ * RECOVERY CODES — storage.
+ *
+ * `MfaRecoveryCode` exists in the schema for exactly this and is used
+ * here: `id`, `userId`, `codeHash String @unique`, `usedAt DateTime?`,
+ * `createdAt`, with `@@index([userId, usedAt])` — which is precisely the
+ * query this file runs. No ambiguity to resolve, and no reason to reach
+ * for `OneTimeToken`: that model would have forced an `applicationId` FK
+ * onto a credential that is not application-scoped, and `TokenPurpose`
+ * has no MFA_RECOVERY member to tag rows with.
+ *
+ * TWO THINGS THE SCHEMA IMPLIES, worth stating because they are decisions
+ * by omission rather than by design:
+ *
+ *   1. There is no relation to `MfaMethod`. Recovery codes belong to the
+ *      USER, not to a particular second factor. So they survive removing
+ *      and re-enrolling TOTP unless something explicitly clears them —
+ *      which is why regeneration below replaces the whole set, and why a
+ *      future "disable MFA" endpoint must decide whether to delete them.
+ *      Leaving live recovery codes behind on an account with no MFA would
+ *      be a standing bypass.
+ *
+ *   2. There is no expiry column. A recovery code is good until used or
+ *      replaced. That is the conventional behaviour and is fine, but it
+ *      does mean a code printed out three years ago still opens the
+ *      account.
+ */
+
+/**
+ * Crockford-style base32 minus the characters people misread when copying
+ * a code off a screen or a printout: 0/O, 1/I/L, and U (which is excluded
+ * from Crockford's set to avoid accidental obscenities). 30 symbols.
+ */
+const RECOVERY_ALPHABET =
+  "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+const RECOVERY_CODE_COUNT = 10;
+
+const RECOVERY_GROUP_LENGTH = 4;
+const RECOVERY_GROUPS = 2;
+
+/**
+ * 8 symbols from a 30-character alphabet is ~39 bits — around 550 billion
+ * possibilities. Guessing one is not a threat model; losing the printout
+ * is. The formatting (xxxx-xxxx) exists to make transcription reliable,
+ * not to add entropy.
+ */
+function generateRecoveryCode(): string {
+  const groups: string[] = [];
+
+  for (let g = 0; g < RECOVERY_GROUPS; g += 1) {
+    let group = "";
+
+    for (
+      let i = 0;
+      i < RECOVERY_GROUP_LENGTH;
+      i += 1
+    ) {
+      // randomInt is rejection-sampled, so this carries none of the
+      // modulo bias that `randomBytes[i] % 30` would.
+      group += RECOVERY_ALPHABET.charAt(
+        randomInt(RECOVERY_ALPHABET.length),
+      );
+    }
+
+    groups.push(group);
+  }
+
+  return groups.join("-");
+}
+
+/**
+ * Canonical form for hashing and lookup.
+ *
+ * Users retype these from paper, so case and dashes must not matter —
+ * "ab12-cd34", "AB12CD34" and " AB12-CD34 " all have to find the same
+ * row. Normalisation happens on both the write and the read path; if
+ * these ever diverge, every recovery code in the system silently stops
+ * working.
+ */
+function normalizeRecoveryCode(
+  code: string,
+): string {
+  return code
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function hashRecoveryCode(
+  code: string,
+): string {
+  return hashOpaqueToken(
+    normalizeRecoveryCode(code),
+  );
+}
+
+/**
+ * Generates a fresh set of recovery codes, replacing any that exist.
+ *
+ * REPLACES, never appends: regenerating is what a user does when they
+ * think the old list leaked, so the old list must stop working. Old rows
+ * are deleted rather than stamped used — `usedAt` means "this code was
+ * spent to get into the account", and marking a superseded code as used
+ * would put a false entry in front of anyone auditing how an account was
+ * accessed.
+ *
+ * Returns the raw codes. THIS IS THE ONLY TIME THEY EXIST IN READABLE
+ * FORM — only HMACs are stored, so there is no way to show them again,
+ * and no endpoint should ever try.
+ *
+ * Accepts an optional `tx` so setup confirmation can generate codes in the
+ * same transaction that enables MFA — an account must never end up with
+ * MFA on and no way back in.
+ */
+export async function generateRecoveryCodes(
+  userId: string,
+  options: {
+    applicationId?: string | null;
+
+    ipAddress?: string | null;
+    userAgent?: string | null;
+
+    tx?: Prisma.TransactionClient;
+  } = {},
+): Promise<string[]> {
+  const codes = Array.from(
+    { length: RECOVERY_CODE_COUNT },
+    () => generateRecoveryCode(),
+  );
+
+  const run = async (
+    tx: Prisma.TransactionClient,
+  ) => {
+    const replaced =
+      await tx.mfaRecoveryCode.deleteMany({
+        where: { userId },
+      });
+
+    await tx.mfaRecoveryCode.createMany({
+      data: codes.map((code) => ({
+        userId,
+        codeHash: hashRecoveryCode(code),
+      })),
+    });
+
+    await logAuditEvent({
+      tx,
+
+      action: "MFA_RECOVERY_CODES_GENERATED",
+      actorType: AuditActorType.USER,
+
+      applicationId:
+        options.applicationId ?? null,
+
+      userId,
+
+      resourceType: "User",
+      resourceId: userId,
+
+      ipAddress: options.ipAddress ?? null,
+      userAgent: options.userAgent ?? null,
+
+      // Counts only. Never a code, never a hash.
+      metadata: {
+        generated: codes.length,
+        replaced: replaced.count,
+      },
+    });
+  };
+
+  if (options.tx) {
+    await run(options.tx);
+  } else {
+    await prisma.$transaction(run);
+  }
+
+  return codes;
+}
+
+/**
+ * Spends a recovery code.
+ *
+ * Returns true if the code was valid and is now consumed, false
+ * otherwise. Returns rather than throws because the caller — the login
+ * challenge — treats "not a recovery code either" as one branch of a
+ * single decision, not as an error in itself.
+ *
+ * A USED CODE IS A SIGNAL, NOT JUST A STATE CHANGE. Someone spending a
+ * recovery code has usually lost their authenticator device — or someone
+ * else has their printout. That is why this writes its own audit action
+ * and a warn-level log line rather than folding into the generic
+ * challenge-success entry: it is the sort of event a security team wants
+ * to be able to alert on directly.
+ */
+export async function useRecoveryCode(
+  userId: string,
+  code: string,
+  options: {
+    applicationId?: string | null;
+
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  } = {},
+): Promise<boolean> {
+  const codeHash = hashRecoveryCode(code);
+
+  // codeHash is globally @unique, so this finds at most one row; the
+  // userId check below is what stops one user's code from unlocking
+  // another's account.
+  const existing =
+    await prisma.mfaRecoveryCode.findUnique({
+      where: { codeHash },
+
+      select: {
+        id: true,
+        userId: true,
+        usedAt: true,
+      },
+    });
+
+  if (
+    !existing ||
+    existing.userId !== userId ||
+    existing.usedAt
+  ) {
+    return false;
+  }
+
+  const remaining = await prisma.$transaction(
+    async (tx) => {
+      // Guarded on usedAt: null — two concurrent submissions of the same
+      // code must not both succeed.
+      const consumed =
+        await tx.mfaRecoveryCode.updateMany({
+          where: {
+            id: existing.id,
+            usedAt: null,
+          },
+
+          data: { usedAt: new Date() },
+        });
+
+      if (consumed.count !== 1) {
+        return null;
+      }
+
+      const left =
+        await tx.mfaRecoveryCode.count({
+          where: {
+            userId,
+            usedAt: null,
+          },
+        });
+
+      await logAuditEvent({
+        tx,
+
+        action: "MFA_RECOVERY_CODE_USED",
+        actorType: AuditActorType.USER,
+
+        applicationId:
+          options.applicationId ?? null,
+
+        userId,
+
+        resourceType: "MfaRecoveryCode",
+        resourceId: existing.id,
+
+        ipAddress: options.ipAddress ?? null,
+        userAgent: options.userAgent ?? null,
+
+        metadata: {
+          remainingCodes: left,
+        },
+      });
+
+      return left;
+    },
+  );
+
+  if (remaining === null) {
+    return false;
+  }
+
+  // warn, not info: this is an account being opened without the enrolled
+  // device, and it is worth surfacing in whatever watches the logs.
+  logger.warn(
+    {
+      userId,
+      remainingCodes: remaining,
+    },
+    "MFA recovery code used — user may have lost their authenticator device",
+  );
+
+  return true;
+}
+
+/**
+ * How many unused recovery codes a user has left.
+ *
+ * A count and nothing else. There is deliberately no endpoint that
+ * returns the codes themselves — only hashes are stored, so it would be
+ * impossible anyway, and an endpoint that appeared to offer it would
+ * invite someone to store them in plaintext to make it work.
+ */
+export async function countRemainingRecoveryCodes(
+  userId: string,
+): Promise<number> {
+  return prisma.mfaRecoveryCode.count({
+    where: {
+      userId,
+      usedAt: null,
+    },
+  });
 }

@@ -105,7 +105,15 @@ export const mfaChallengeSchema =
       .min(1, "Challenge token is required")
       .max(512),
 
-    code: totpCodeSchema,
+    // NOT totpCodeSchema — the challenge endpoint accepts either a TOTP
+    // code or a recovery code, and a digits-only rule would reject every
+    // recovery code before the service ever saw it. The service decides
+    // which kind it is; this only bounds the length.
+    code: z
+      .string()
+      .trim()
+      .min(1, "Enter your authenticator code or a recovery code")
+      .max(64),
   });
 
 export const verifyTotpSetupSchema =

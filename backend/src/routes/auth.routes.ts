@@ -10,6 +10,8 @@ import {
   loginController,
   logoutController,
   mfaChallengeController,
+  recoveryCodesCountController,
+  regenerateRecoveryCodesController,
   meController,
   refreshController,
   resendVerificationController,
@@ -230,6 +232,32 @@ authRouter.post(
 
   asyncHandler(
     verifyTotpSetupController,
+  ),
+);
+
+// Settings-page actions, both requireAuth. Regeneration replaces the
+// existing set, so the previous codes stop working the moment this
+// returns.
+authRouter.post(
+  "/mfa/recovery-codes/regenerate",
+
+  verifyRequestOrigin,
+  requireAuth,
+
+  asyncHandler(
+    regenerateRecoveryCodesController,
+  ),
+);
+
+// Returns a count and nothing else. There is no endpoint that returns the
+// codes themselves, and there cannot be — only their hashes are stored.
+authRouter.get(
+  "/mfa/recovery-codes/count",
+
+  requireAuth,
+
+  asyncHandler(
+    recoveryCodesCountController,
   ),
 );
 
