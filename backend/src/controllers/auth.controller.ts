@@ -4,11 +4,16 @@ import type {
 } from "express";
 
 import {
+  forgotPasswordSchema,
   loginSchema,
   resendVerificationSchema,
   signupSchema,
   verifyEmailSchema,
 } from "../validators/auth.validator.ts";
+
+import {
+  requestPasswordReset,
+} from "../services/password-reset.service.ts";
 
 import {
   resendVerification,
@@ -173,6 +178,45 @@ export async function resendVerificationController(
 
     message:
       "If an account exists for that address, a verification email has been sent.",
+  });
+}
+
+/**
+ * ONE RESPONSE, ALWAYS — see resendVerificationController. The same rule
+ * applies with more force here: this endpoint is the classic probe for
+ * "which of these addresses has an account", and `requestPasswordReset`
+ * never throws, so there is no error branch that could differ. Do not add
+ * one.
+ */
+export async function forgotPasswordController(
+  req: Request,
+  res: Response,
+) {
+  const input =
+    forgotPasswordSchema.parse(
+      req.body,
+    );
+
+  await requestPasswordReset(
+    requireApplicationId(req),
+
+    input.email,
+
+    {
+      ipAddress:
+        req.ip ?? null,
+
+      userAgent:
+        req.get("user-agent") ??
+        null,
+    },
+  );
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      "If an account with that email exists, a password reset link has been sent.",
   });
 }
 

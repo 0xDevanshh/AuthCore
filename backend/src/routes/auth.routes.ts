@@ -3,6 +3,7 @@ import {
 } from "express";
 
 import {
+  forgotPasswordController,
   loginController,
   logoutController,
   meController,
@@ -35,6 +36,8 @@ import {
   loginLimiter,
   oauthLimiter,
   refreshLimiter,
+  forgotPasswordEmailLimiter,
+  forgotPasswordIpLimiter,
   resendVerificationEmailLimiter,
   resendVerificationIpLimiter,
   signupLimiter,
@@ -106,6 +109,23 @@ authRouter.post(
 
   asyncHandler(
     resendVerificationController,
+  ),
+);
+
+// Public, through resolveApplication — same shape as
+// /resend-verification, including the load-bearing middleware order: IP
+// limiter before the API-key lookup, per-address limiter after it, since
+// its key includes the resolved application id.
+authRouter.post(
+  "/forgot-password",
+
+  verifyRequestOrigin,
+  forgotPasswordIpLimiter,
+  resolveApplication,
+  forgotPasswordEmailLimiter,
+
+  asyncHandler(
+    forgotPasswordController,
   ),
 );
 

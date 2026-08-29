@@ -3,7 +3,10 @@ import { Resend } from "resend";
 import { env } from "../config/env.ts";
 import { logger } from "../config/logger.ts";
 
-import { verificationEmailTemplate } from "./email-templates.ts";
+import {
+  passwordResetEmailTemplate,
+  verificationEmailTemplate,
+} from "./email-templates.ts";
 
 /**
  * Single client for the process. The SDK is a thin wrapper over fetch and
@@ -158,6 +161,42 @@ export async function sendVerificationEmail(
 
     html: verificationEmailTemplate(
       verifyUrl,
+    ),
+  });
+}
+
+export function buildPasswordResetUrl(
+  rawToken: string,
+): string {
+  // Same FRONTEND_URL as verification — the reset page is a frontend
+  // route, not an API endpoint.
+  const url = new URL(
+    "/reset-password",
+    env.FRONTEND_URL,
+  );
+
+  url.searchParams.set(
+    "token",
+    rawToken,
+  );
+
+  return url.toString();
+}
+
+/**
+ * Sends a password reset email. Throws if the send fails — see `sendEmail`.
+ */
+export async function sendPasswordResetEmail(
+  to: string,
+  resetUrl: string,
+): Promise<void> {
+  await sendEmail({
+    to,
+
+    subject: "Reset your password",
+
+    html: passwordResetEmailTemplate(
+      resetUrl,
     ),
   });
 }

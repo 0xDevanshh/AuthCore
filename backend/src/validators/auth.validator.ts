@@ -79,11 +79,19 @@ export const resendVerificationSchema =
     email: emailSchema,
   });
 
+export const forgotPasswordSchema =
+  z.object({
+    email: emailSchema,
+  });
+
 export type SignupInput =
   z.infer<typeof signupSchema>;
 
 export type ResendVerificationInput =
   z.infer<typeof resendVerificationSchema>;
+
+export type ForgotPasswordInput =
+  z.infer<typeof forgotPasswordSchema>;
 
 export type VerifyEmailInput =
   z.infer<typeof verifyEmailSchema>;

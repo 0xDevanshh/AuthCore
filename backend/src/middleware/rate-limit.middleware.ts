@@ -81,38 +81,45 @@ export const verifyEmailLimiter =
     },
   });
 
-const RESEND_VERIFICATION_MESSAGE = {
-  success: false,
-
-  message:
-    "Too many verification emails requested. Try again later.",
-};
+const HOUR_MS = 60 * 60 * 1000;
 
 /**
- * Per-address limit on resend-verification.
+ * Builds a limiter keyed on the email address in the request body.
+ *
+ * Every public endpoint that mails something to an address the caller
+ * names needs this shape, so it is a helper rather than a copy per route:
+ * resend-verification and forgot-password today, and any future
+ * email-change confirmation.
  *
  * Keyed on the target address rather than the caller's IP, because the
- * abuse this guards against is email-bombing one inbox: an attacker with a
- * pool of IPs would sail past an IP-keyed limit while the victim collects
- * the mail. Scoped by application id too, so one tenant's traffic cannot
+ * abuse this guards against is bombing one inbox: an attacker with a pool
+ * of IPs would sail past an IP-keyed limit while the victim collects the
+ * mail. Scoped by application id too, so one tenant's traffic cannot
  * exhaust another's budget for the same address.
  *
- * Requests with no usable email fall back to an IP key — those are
- * malformed bodies that the validator will reject anyway, and they must
- * not all collide on one shared bucket.
+ * `prefix` keeps each route's buckets separate — one address's
+ * forgot-password budget must not be spent by its resend-verification
+ * requests, or either endpoint could lock the other out.
  *
- * Counted on every request, not just successful ones: skipping the ones
- * that found no account would make the limit itself an oracle for account
- * existence, undoing the generic response this endpoint is built around.
+ * Requests with no usable email fall back to an IP key — those are
+ * malformed bodies the validator will reject anyway, and they must not all
+ * collide on one shared bucket.
+ *
+ * Counts every request, not just the ones that found an account. Skipping
+ * the misses would make the limit itself an oracle for account existence,
+ * undoing the generic response these endpoints are built around.
  */
-export const resendVerificationEmailLimiter =
-  rateLimit({
+function emailKeyedLimiter(options: {
+  prefix: string;
+  windowMs: number;
+  max: number;
+  message: string;
+}) {
+  return rateLimit({
     ...commonOptions,
 
-    windowMs:
-      60 * 60 * 1000,
-
-    max: 3,
+    windowMs: options.windowMs,
+    max: options.max,
 
     keyGenerator: (
       req: Request,
@@ -126,14 +133,28 @@ export const resendVerificationEmailLimiter =
           : null;
 
       if (!email) {
-        return `resend-verify:ip:${ipKeyGenerator(req.ip ?? "")}`;
+        return `${options.prefix}:ip:${ipKeyGenerator(req.ip ?? "")}`;
       }
 
-      return `resend-verify:${req.applicationId ?? "none"}:${email}`;
+      return `${options.prefix}:${req.applicationId ?? "none"}:${email}`;
     },
 
+    message: {
+      success: false,
+      message: options.message,
+    },
+  });
+}
+
+export const resendVerificationEmailLimiter =
+  emailKeyedLimiter({
+    prefix: "resend-verify",
+
+    windowMs: HOUR_MS,
+    max: 3,
+
     message:
-      RESEND_VERIFICATION_MESSAGE,
+      "Too many verification emails requested. Try again later.",
   });
 
 /**
@@ -144,13 +165,48 @@ export const resendVerificationIpLimiter =
   rateLimit({
     ...commonOptions,
 
-    windowMs:
-      60 * 60 * 1000,
+    windowMs: HOUR_MS,
 
     max: 20,
 
+    message: {
+      success: false,
+
+      message:
+        "Too many verification emails requested. Try again later.",
+    },
+  });
+
+export const forgotPasswordEmailLimiter =
+  emailKeyedLimiter({
+    prefix: "forgot-password",
+
+    windowMs: HOUR_MS,
+    max: 3,
+
     message:
-      RESEND_VERIFICATION_MESSAGE,
+      "Too many password reset requests. Try again later.",
+  });
+
+/**
+ * Companion IP limit — see resendVerificationIpLimiter. Tighter than that
+ * one: a reset link is a credential, so a spray of reset mail across many
+ * addresses is worth cutting off sooner than a spray of verification mail.
+ */
+export const forgotPasswordIpLimiter =
+  rateLimit({
+    ...commonOptions,
+
+    windowMs: HOUR_MS,
+
+    max: 10,
+
+    message: {
+      success: false,
+
+      message:
+        "Too many password reset requests. Try again later.",
+    },
   });
 
 export const oauthLimiter =

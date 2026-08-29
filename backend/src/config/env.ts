@@ -62,6 +62,15 @@ const envSchema = z.object({
     .positive()
     .default(86400), // 24 hours
 
+  // Shorter again than EMAIL_VERIFICATION_TTL_SECONDS: a live reset link
+  // is a standing credential for the account, so it should not sit unused
+  // for a day the way a verification link harmlessly can.
+  PASSWORD_RESET_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(3600), // 1 hour
+
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
 });
 
