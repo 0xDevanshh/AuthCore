@@ -3,6 +3,7 @@ import {
 } from "express";
 
 import {
+  changePasswordController,
   forgotPasswordController,
   loginController,
   logoutController,
@@ -165,6 +166,19 @@ authRouter.post(
 
   asyncHandler(
     logoutController,
+  ),
+);
+
+// requireAuth, and no resolveApplication: the session is the credential
+// here, not an API key. See the note on changePasswordController.
+authRouter.post(
+  "/change-password",
+
+  verifyRequestOrigin,
+  requireAuth,
+
+  asyncHandler(
+    changePasswordController,
   ),
 );
 

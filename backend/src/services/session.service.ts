@@ -175,6 +175,12 @@ async function revokeFamily(
  * the change that motivated it — a password reset must not be able to
  * commit while leaving the attacker's session alive.
  *
+ * `exceptSessionId` spares one session. An authenticated change-password
+ * is making its request through a session of its own, and revoking that
+ * one would sign the user out of the settings page as a reward for
+ * rotating their password. Reset has no such session to spare and passes
+ * nothing, so it still kills everything.
+ *
  * Refresh tokens are revoked by session id rather than by a relation
  * filter because Prisma's `updateMany` does not accept one.
  */
@@ -182,6 +188,7 @@ export async function revokeAllUserSessions(
   userId: string,
   reason: string,
   tx?: Prisma.TransactionClient,
+  exceptSessionId?: string | null,
 ): Promise<number> {
   const client = tx ?? prisma;
 
@@ -192,6 +199,10 @@ export async function revokeAllUserSessions(
       where: {
         userId,
         revokedAt: null,
+
+        ...(exceptSessionId
+          ? { id: { not: exceptSessionId } }
+          : {}),
       },
 
       select: { id: true },

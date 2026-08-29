@@ -89,6 +89,21 @@ export const forgotPasswordSchema =
     email: emailSchema,
   });
 
+export const changePasswordSchema =
+  z.object({
+    // Only length-bounded, not policy-checked: this is an existing
+    // credential being presented, and running it through passwordSchema
+    // would reject anyone whose password predates a tightening of the
+    // rules — telling them their real password is invalid.
+    currentPassword: z
+      .string()
+      .min(1, "Current password is required")
+      .max(128),
+
+    // The new one does face the full policy — same schema as signup.
+    newPassword: passwordSchema,
+  });
+
 export const resetPasswordSchema =
   z.object({
     token: z
@@ -112,6 +127,9 @@ export type ForgotPasswordInput =
 
 export type ResetPasswordInput =
   z.infer<typeof resetPasswordSchema>;
+
+export type ChangePasswordInput =
+  z.infer<typeof changePasswordSchema>;
 
 export type VerifyEmailInput =
   z.infer<typeof verifyEmailSchema>;

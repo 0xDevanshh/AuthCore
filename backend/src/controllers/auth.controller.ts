@@ -4,6 +4,7 @@ import type {
 } from "express";
 
 import {
+  changePasswordSchema,
   forgotPasswordSchema,
   loginSchema,
   resendVerificationSchema,
@@ -27,6 +28,10 @@ import {
   login,
   signup,
 } from "../services/auth.service.ts";
+
+import {
+  changePassword,
+} from "../services/user.service.ts";
 
 import {
   revokeSessionByRefreshToken,
@@ -356,6 +361,63 @@ export async function logoutController(
 
     message:
       "Logged out successfully",
+  });
+}
+
+/**
+ * requireAuth, not resolveApplication: this is the user acting on their
+ * own account from a settings page, authenticated by their session. There
+ * is no API key in play — `req.auth.applicationId` carries whichever
+ * application the session belongs to, and that is what the audit entry is
+ * scoped to.
+ */
+export async function changePasswordController(
+  req: Request,
+  res: Response,
+) {
+  if (!req.auth) {
+    throw new AppError(
+      401,
+      "Authentication required",
+    );
+  }
+
+  const input =
+    changePasswordSchema.parse(
+      req.body,
+    );
+
+  await changePassword(
+    req.auth.userId,
+
+    input.currentPassword,
+
+    input.newPassword,
+
+    {
+      // Spares the session this request arrived on — see changePassword.
+      currentSessionId:
+        req.auth.sessionId,
+
+      applicationId:
+        req.auth.applicationId,
+
+      ipAddress:
+        req.ip ?? null,
+
+      userAgent:
+        req.get("user-agent") ??
+        null,
+    },
+  );
+
+  // No new cookies: the current session survives the change, so the
+  // tokens the browser already holds stay valid.
+  res.status(200).json({
+    success: true,
+
+    message:
+      "Password changed successfully. Other devices have been signed out.",
   });
 }
 
