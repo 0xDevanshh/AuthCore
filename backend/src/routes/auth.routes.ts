@@ -9,6 +9,7 @@ import {
   forgotPasswordController,
   loginController,
   logoutController,
+  mfaChallengeController,
   meController,
   refreshController,
   resendVerificationController,
@@ -146,6 +147,23 @@ authRouter.post(
 
   asyncHandler(
     resetPasswordController,
+  ),
+);
+
+// Second half of an MFA login. Public — the user has no session yet —
+// through resolveApplication, exactly like /login.
+//
+// Rate-limited on top of the per-challenge attempt counter in
+// completeMfaLogin; see mfaCodeLimiter for why both exist.
+authRouter.post(
+  "/mfa/challenge",
+
+  verifyRequestOrigin,
+  mfaCodeLimiter,
+  resolveApplication,
+
+  asyncHandler(
+    mfaChallengeController,
   ),
 );
 

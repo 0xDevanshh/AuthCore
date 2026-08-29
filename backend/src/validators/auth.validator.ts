@@ -89,18 +89,31 @@ export const forgotPasswordSchema =
     email: emailSchema,
   });
 
-export const verifyTotpSetupSchema =
+const totpCodeSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^\d{6,8}$/,
+    "Enter the 6-digit code from your authenticator app",
+  );
+
+export const mfaChallengeSchema =
   z.object({
-    // Digits only, but the length is not pinned to 6 here — the service
-    // owns the TOTP parameters, and a validator that hardcodes 6 would
-    // silently start rejecting valid codes if that ever changes.
-    code: z
+    challengeToken: z
       .string()
       .trim()
-      .regex(
-        /^\d{6,8}$/,
-        "Enter the 6-digit code from your authenticator app",
-      ),
+      .min(1, "Challenge token is required")
+      .max(512),
+
+    code: totpCodeSchema,
+  });
+
+export const verifyTotpSetupSchema =
+  z.object({
+    // Digits only, but the length is not pinned to 6 — the service owns
+    // the TOTP parameters, and a validator that hardcoded 6 would
+    // silently start rejecting valid codes if that ever changed.
+    code: totpCodeSchema,
   });
 
 export const changePasswordSchema =
@@ -147,6 +160,9 @@ export type ChangePasswordInput =
 
 export type VerifyTotpSetupInput =
   z.infer<typeof verifyTotpSetupSchema>;
+
+export type MfaChallengeInput =
+  z.infer<typeof mfaChallengeSchema>;
 
 export type VerifyEmailInput =
   z.infer<typeof verifyEmailSchema>;

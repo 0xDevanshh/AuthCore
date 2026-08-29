@@ -1,6 +1,7 @@
 import {
   AuditActorType,
   MfaType,
+  TokenPurpose,
 } from "@prisma/client";
 
 import * as OTPAuth from "otpauth";
@@ -8,8 +9,14 @@ import * as OTPAuth from "otpauth";
 import QRCode from "qrcode";
 
 import { prisma } from "../config/prisma.ts";
+import { env } from "../config/env.ts";
 
 import { AppError } from "../utils/app-error.ts";
+
+import {
+  generateOneTimeToken,
+  hashOpaqueToken,
+} from "../utils/token.ts";
 
 import { logAuditEvent } from "./audit.service.ts";
 
@@ -279,6 +286,86 @@ export async function enrollTotp(
 const TOTP_VALIDATION_WINDOW = 1;
 
 /**
+ * Checks a submitted code against a stored base32 secret.
+ *
+ * Returns the step delta on a match — 0 for the current step, ±1 for
+ * clock drift — and null otherwise. NOTE THAT 0 IS A MATCH: callers must
+ * test `=== null`, never truthiness, or every correctly-timed code is
+ * rejected.
+ *
+ * Shared by enrollment confirmation and login so the two can never drift
+ * apart on window size or digit count — a login that accepted a wider
+ * window than setup did would be a silent weakening.
+ */
+export function validateTotpCode(
+  secretBase32: string,
+  code: string,
+): number | null {
+  // Authenticator apps and users both like to add spaces; the digits are
+  // what matter.
+  const submittedCode = code
+    .trim()
+    .replace(/\s+/g, "");
+
+  const totp = new OTPAuth.TOTP({
+    algorithm: TOTP_ALGORITHM,
+    digits: TOTP_DIGITS,
+    period: TOTP_PERIOD_SECONDS,
+
+    // Plaintext today — see the note at the top of this file.
+    secret: OTPAuth.Secret.fromBase32(
+      secretBase32,
+    ),
+  });
+
+  return totp.validate({
+    token: submittedCode,
+    window: TOTP_VALIDATION_WINDOW,
+  });
+}
+
+/**
+ * The verified, enabled TOTP method for a user, or null.
+ *
+ * "Has MFA" means exactly this pair: `verifiedAt` set (possession was
+ * proven) and `enabled` true. A row with a secret but no verifiedAt is an
+ * abandoned enrollment and must never gate a login.
+ */
+export async function getActiveTotpMethod(
+  userId: string,
+): Promise<{
+  id: string;
+  secretEnc: string;
+} | null> {
+  const method =
+    await prisma.mfaMethod.findFirst({
+      where: {
+        userId,
+        type: MfaType.TOTP,
+
+        verifiedAt: { not: null },
+        enabled: true,
+      },
+
+      select: {
+        id: true,
+        secretEnc: true,
+      },
+
+      orderBy: { verifiedAt: "desc" },
+    });
+
+  if (!method?.secretEnc) {
+    return null;
+  }
+
+  return {
+    id: method.id,
+    secretEnc: method.secretEnc,
+  };
+}
+
+/**
  * Completes TOTP enrollment by proving the user holds the secret.
  *
  * This is the step that makes the method real: `verifiedAt` and `enabled`
@@ -334,23 +421,10 @@ export async function verifyTotpSetup(
     );
   }
 
-  const totp = new OTPAuth.TOTP({
-    algorithm: TOTP_ALGORITHM,
-    digits: TOTP_DIGITS,
-    period: TOTP_PERIOD_SECONDS,
-
-    // Plaintext today — see the note at the top of this file.
-    secret: OTPAuth.Secret.fromBase32(
-      pending.secretEnc,
-    ),
-  });
-
-  // Returns the step delta on a match, null otherwise. `delta === 0` is a
-  // valid result, so this must be an explicit null check.
-  const delta = totp.validate({
-    token: submittedCode,
-    window: TOTP_VALIDATION_WINDOW,
-  });
+  const delta = validateTotpCode(
+    pending.secretEnc,
+    submittedCode,
+  );
 
   if (delta === null) {
     throw new AppError(
@@ -426,4 +500,306 @@ export async function verifyTotpSetup(
   // `MfaRecoveryCode` model already exists in the schema (userId,
   // codeHash @unique, usedAt) and is unused. Wire this before enforcement
   // ships, not merely before the phase is called done.
+}
+
+/**
+ * Challenge tokens reuse `OneTimeToken` rather than getting a table of
+ * their own.
+ *
+ * The fit is exact, not forced: `TokenPurpose.MFA_CHALLENGE` already
+ * exists in the enum, and the model carries every column this needs —
+ * `tokenHash @unique` for the HMAC, `expiresAt`, `usedAt` for single-use
+ * consumption, `userId` and `applicationId` FKs, and `attempts`, which is
+ * what makes per-challenge throttling possible without a schema change.
+ * A new table would duplicate all of it.
+ *
+ * (Contrast invitations, which genuinely could not use this model — see
+ * the header note in invitation.service.ts.)
+ */
+const MFA_CHALLENGE_MAX_ATTEMPTS = 5;
+
+function challengeExpiry(): Date {
+  return new Date(
+    Date.now() +
+      env.MFA_CHALLENGE_TTL_SECONDS * 1000,
+  );
+}
+
+export interface MfaChallenge {
+  challengeToken: string;
+  expiresAt: Date;
+}
+
+/**
+ * Issues a challenge for a login that has passed the password check but
+ * not yet the second factor.
+ *
+ * This token is NOT a session. It authenticates nothing: it identifies one
+ * pending login, is good for a single successful code submission, and
+ * expires in minutes. Nothing accepts it as a credential except
+ * completeMfaLogin.
+ *
+ * Any older live challenge for the user is consumed first — the same
+ * one-live-token rule email verification and password reset follow. A user
+ * who retries login twice should not leave two challenges standing, either
+ * of which would open a session.
+ */
+export async function issueMfaChallenge(
+  userId: string,
+  applicationId: string,
+  metadata: {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  } = {},
+): Promise<MfaChallenge> {
+  const token = generateOneTimeToken();
+
+  const expiresAt = challengeExpiry();
+
+  await prisma.$transaction(async (tx) => {
+    const now = new Date();
+
+    await tx.oneTimeToken.updateMany({
+      where: {
+        userId,
+        purpose: TokenPurpose.MFA_CHALLENGE,
+
+        usedAt: null,
+        expiresAt: { gt: now },
+      },
+
+      data: { usedAt: now },
+    });
+
+    const created = await tx.oneTimeToken.create({
+      data: {
+        applicationId,
+        userId,
+
+        purpose: TokenPurpose.MFA_CHALLENGE,
+
+        tokenHash: token.hashedToken,
+
+        expiresAt,
+      },
+    });
+
+    await logAuditEvent({
+      tx,
+
+      action: "MFA_CHALLENGE_ISSUED",
+      actorType: AuditActorType.USER,
+
+      applicationId,
+      userId,
+
+      resourceType: "OneTimeToken",
+      resourceId: created.id,
+
+      ipAddress: metadata.ipAddress ?? null,
+      userAgent: metadata.userAgent ?? null,
+
+      metadata: {
+        expiresAt: expiresAt.toISOString(),
+      },
+    });
+  });
+
+  return {
+    challengeToken: token.rawToken,
+    expiresAt,
+  };
+}
+
+/**
+ * Completes a login by validating the second factor.
+ *
+ * Failure handling differs from the enrollment step on purpose. There, a
+ * wrong code is a typo; here it is a login attempt against an account
+ * whose password is already known to the caller, so every failure is
+ * counted on the challenge row and the challenge is burned once
+ * MFA_CHALLENGE_MAX_ATTEMPTS is reached. That per-challenge counter is
+ * the real brute-force defence — the route's IP limiter is a backstop, and
+ * an attacker with an IP pool walks around it.
+ *
+ * Five attempts against a 6-digit code with a +/-1 step window is roughly
+ * a 1-in-70,000 chance per challenge, and a burned challenge costs a fresh
+ * password login to replace.
+ */
+export async function completeMfaLogin(
+  challengeToken: string,
+  totpCode: string,
+  applicationId: string,
+  metadata: {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  } = {},
+): Promise<{ userId: string }> {
+  const tokenHash = hashOpaqueToken(
+    challengeToken.trim(),
+  );
+
+  const challenge =
+    await prisma.oneTimeToken.findUnique({
+      where: { tokenHash },
+
+      select: {
+        id: true,
+        userId: true,
+        purpose: true,
+        usedAt: true,
+        expiresAt: true,
+        attempts: true,
+
+        user: {
+          select: { disabledAt: true },
+        },
+      },
+    });
+
+  // Every rejection below is 401 with the same code. The caller is
+  // mid-login and unauthenticated; the only useful instruction is "start
+  // again", and naming which of these went wrong would tell an attacker
+  // holding a stolen challenge whether it is still live.
+  if (
+    !challenge ||
+    challenge.purpose !==
+      TokenPurpose.MFA_CHALLENGE ||
+    challenge.usedAt ||
+    challenge.expiresAt <= new Date() ||
+    challenge.user.disabledAt ||
+    challenge.attempts >=
+      MFA_CHALLENGE_MAX_ATTEMPTS
+  ) {
+    throw new AppError(
+      401,
+      "Invalid or expired MFA challenge. Please log in again.",
+      "MFA_CHALLENGE_INVALID",
+    );
+  }
+
+  const method = await getActiveTotpMethod(
+    challenge.userId,
+  );
+
+  // MFA was removed between issuing this challenge and answering it.
+  // There is nothing to verify against, and accepting the login without a
+  // second factor would defeat the point of having issued a challenge.
+  if (!method) {
+    throw new AppError(
+      401,
+      "Invalid or expired MFA challenge. Please log in again.",
+      "MFA_CHALLENGE_INVALID",
+    );
+  }
+
+  const delta = validateTotpCode(
+    method.secretEnc,
+    totpCode,
+  );
+
+  if (delta === null) {
+    const counted =
+      await prisma.oneTimeToken.update({
+        where: { id: challenge.id },
+        data: { attempts: { increment: 1 } },
+        select: { attempts: true },
+      });
+
+    const exhausted =
+      counted.attempts >=
+      MFA_CHALLENGE_MAX_ATTEMPTS;
+
+    if (exhausted) {
+      // Burn it rather than leaving a token that only ever rejects.
+      await prisma.oneTimeToken.updateMany({
+        where: {
+          id: challenge.id,
+          usedAt: null,
+        },
+
+        data: { usedAt: new Date() },
+      });
+    }
+
+    await logAuditEvent({
+      action: "MFA_CHALLENGE_FAILED",
+      actorType: AuditActorType.USER,
+
+      applicationId,
+      userId: challenge.userId,
+
+      resourceType: "OneTimeToken",
+      resourceId: challenge.id,
+
+      ipAddress: metadata.ipAddress ?? null,
+      userAgent: metadata.userAgent ?? null,
+
+      metadata: {
+        attempts: counted.attempts,
+        challengeBurned: exhausted,
+      },
+    });
+
+    throw new AppError(
+      401,
+      "Invalid code",
+      "MFA_INVALID_CODE",
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Guarded on usedAt: null, so two concurrent submissions of the same
+    // valid code cannot both open a session.
+    const consumed =
+      await tx.oneTimeToken.updateMany({
+        where: {
+          id: challenge.id,
+          usedAt: null,
+        },
+
+        data: { usedAt: new Date() },
+      });
+
+    if (consumed.count !== 1) {
+      throw new AppError(
+        401,
+        "Invalid or expired MFA challenge. Please log in again.",
+        "MFA_CHALLENGE_INVALID",
+      );
+    }
+
+    await tx.mfaMethod.update({
+      where: { id: method.id },
+      data: { lastUsedAt: new Date() },
+    });
+
+    await logAuditEvent({
+      tx,
+
+      action: "MFA_CHALLENGE_SUCCESS",
+      actorType: AuditActorType.USER,
+
+      applicationId,
+      userId: challenge.userId,
+
+      resourceType: "MfaMethod",
+      resourceId: method.id,
+
+      ipAddress: metadata.ipAddress ?? null,
+      userAgent: metadata.userAgent ?? null,
+
+      metadata: {
+        clockDriftSteps: delta,
+        attempts: challenge.attempts,
+      },
+    });
+  });
+
+  // The session itself is created by the caller, which owns that concern.
+  // NOTE the small window this leaves: the challenge is consumed here, so
+  // if session creation then fails the user must log in again. Preferable
+  // to the alternative — a challenge that survives a partial failure and
+  // can be replayed.
+  return { userId: challenge.userId };
 }

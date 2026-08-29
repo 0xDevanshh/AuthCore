@@ -62,6 +62,15 @@ const envSchema = z.object({
     .positive()
     .default(86400), // 24 hours
 
+  // Long enough to fetch a phone and read a code, short enough that a
+  // half-finished login is not a standing credential. This is the window
+  // in which a stolen challenge token is worth something.
+  MFA_CHALLENGE_TTL_SECONDS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300), // 5 minutes
+
   // Shorter again than EMAIL_VERIFICATION_TTL_SECONDS: a live reset link
   // is a standing credential for the account, so it should not sit unused
   // for a day the way a verification link harmlessly can.

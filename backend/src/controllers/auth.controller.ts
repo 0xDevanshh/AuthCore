@@ -7,6 +7,7 @@ import {
   changePasswordSchema,
   forgotPasswordSchema,
   loginSchema,
+  mfaChallengeSchema,
   resendVerificationSchema,
   resetPasswordSchema,
   signupSchema,
@@ -35,11 +36,13 @@ import {
 } from "../services/user.service.ts";
 
 import {
+  completeMfaLogin,
   enrollTotp,
   verifyTotpSetup,
 } from "../services/mfa.service.ts";
 
 import {
+  createSession,
   revokeSessionByRefreshToken,
   rotateRefreshToken,
 } from "../services/session.service.ts";
@@ -297,6 +300,36 @@ export async function loginController(
       requestMetadata(req),
     );
 
+  // Half a login. No cookies are set, because there is no session yet —
+  // the challenge token is not a credential for anything but
+  // /mfa/challenge. Carries no user data by design; see the note in
+  // auth.service.ts.
+  if (result.mfaRequired) {
+    res.set(
+      "Cache-Control",
+      "no-store",
+    );
+
+    res.status(200).json({
+      success: true,
+
+      message:
+        "Enter the code from your authenticator app to finish signing in.",
+
+      data: {
+        mfaRequired: true,
+
+        challengeToken:
+          result.challengeToken,
+
+        expiresAt:
+          result.expiresAt,
+      },
+    });
+
+    return;
+  }
+
   setAuthCookies(
     res,
     result.tokens,
@@ -309,7 +342,72 @@ export async function loginController(
       "Login successful",
 
     data: {
+      // Explicit rather than omitted, so a client can branch on one field
+      // in both cases instead of inferring from what is absent.
+      mfaRequired: false,
+
       user: result.user,
+    },
+  });
+}
+
+/**
+ * Second half of an MFA login.
+ *
+ * Public and behind resolveApplication, like /login itself — the user has
+ * no session yet, which is the entire premise. The challenge token plus a
+ * valid code is what authenticates this request.
+ */
+export async function mfaChallengeController(
+  req: Request,
+  res: Response,
+) {
+  const input =
+    mfaChallengeSchema.parse(
+      req.body,
+    );
+
+  const metadata =
+    requestMetadata(req);
+
+  const { userId } =
+    await completeMfaLogin(
+      input.challengeToken,
+
+      input.code,
+
+      requireApplicationId(req),
+
+      {
+        ipAddress:
+          metadata.ipAddress,
+
+        userAgent:
+          metadata.userAgent,
+      },
+    );
+
+  // Issued here, after the second factor — the same session the password
+  // path would have created, no weaker and no different.
+  const tokens =
+    await createSession(
+      userId,
+      metadata,
+    );
+
+  const user =
+    await getSafeUser(userId);
+
+  setAuthCookies(res, tokens);
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      "Login successful",
+
+    data: {
+      user,
     },
   });
 }

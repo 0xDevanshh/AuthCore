@@ -26,6 +26,37 @@ import {
 
 import { logger } from "../config/logger.ts";
 
+import {
+  getActiveTotpMethod,
+  issueMfaChallenge,
+} from "./mfa.service.ts";
+
+/**
+ * OPEN QUESTION — MFA and OAuth login.
+ *
+ * This gate is on the password path only. `loginWithOAuth` in
+ * oauth.service.ts still issues a session directly, so a user with TOTP
+ * enrolled who signs in with Google today skips their second factor
+ * entirely.
+ *
+ * That is NOT obviously wrong, which is exactly why it is left alone
+ * here. Google has already applied whatever second factor the user has on
+ * that account, so demanding a TOTP code on top can be redundant friction
+ * — and a user who enrolled TOTP for password login may not think of it
+ * as guarding their Google button. But the two are not equivalent: the
+ * AuthCore TOTP method is a factor this system controls and can reason
+ * about, whereas "Google says so" is an assertion about a third-party
+ * account whose own MFA posture is unknown and can be weakened without
+ * anyone here noticing.
+ *
+ * The three defensible answers are: always challenge, never challenge,
+ * or make it an application-level setting. Picking one silently would
+ * bake a security posture into the product as a side effect of a prompt
+ * about password login, so it is deliberately left open. Whoever decides
+ * should also settle what happens to an account whose ONLY login method
+ * is OAuth — enrolling TOTP there currently guards nothing.
+ */
+
 // Lives in user.service.ts so verification.service.ts can return the same
 // /me shape without a circular import; re-exported here because callers
 // (and the rest of this file) have always reached for it through
@@ -324,6 +355,60 @@ export async function login(
     );
   }
 
+  // THE PASSWORD IS NOT THE WHOLE LOGIN ANY MORE.
+  //
+  // A user with a verified, enabled TOTP method gets a challenge instead
+  // of a session — no access token, no refresh token, no user record.
+  // Everything below this point is the second half of the login, and it
+  // lives in completeMfaLogin.
+  const totpMethod =
+    await getActiveTotpMethod(
+      emailRecord.user.id,
+    );
+
+  if (totpMethod) {
+    // OneTimeToken.applicationId is a required FK, so a challenge cannot
+    // be minted without one. Every end-user auth route runs behind
+    // resolveApplication, so this is a wiring error rather than something
+    // a client can trigger.
+    if (!metadata.applicationId) {
+      throw new AppError(
+        401,
+        "Missing API key",
+        "API_KEY_MISSING",
+      );
+    }
+
+    const challenge =
+      await issueMfaChallenge(
+        emailRecord.user.id,
+
+        metadata.applicationId,
+
+        {
+          ipAddress:
+            metadata.ipAddress ?? null,
+
+          userAgent:
+            metadata.userAgent ?? null,
+        },
+      );
+
+    // Deliberately no user object. The caller has proven the password but
+    // not the second factor, and profile data — name, avatar, email
+    // addresses — is not something a half-authenticated request should
+    // be able to read. The challenge token and its expiry are the only
+    // things the client needs to render a code prompt.
+    return {
+      mfaRequired: true as const,
+
+      challengeToken:
+        challenge.challengeToken,
+
+      expiresAt: challenge.expiresAt,
+    };
+  }
+
   const tokens =
     await createSession(
       emailRecord.user.id,
@@ -336,6 +421,7 @@ export async function login(
     );
 
   return {
+    mfaRequired: false as const,
     user,
     tokens,
   };
