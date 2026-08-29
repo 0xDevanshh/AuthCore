@@ -11,6 +11,7 @@ import {
   resetPasswordSchema,
   signupSchema,
   verifyEmailSchema,
+  verifyTotpSetupSchema,
 } from "../validators/auth.validator.ts";
 
 import {
@@ -35,6 +36,7 @@ import {
 
 import {
   enrollTotp,
+  verifyTotpSetup,
 } from "../services/mfa.service.ts";
 
 import {
@@ -483,6 +485,60 @@ export async function enrollTotpController(
       // Explicit so the client does not present this as done. The method
       // is inert until the confirmation step passes.
       verified: false,
+    },
+  });
+}
+
+/**
+ * Confirms enrollment. requireAuth, same as the enroll step.
+ *
+ * Note what this does NOT do: it issues no new tokens and does not touch
+ * the session. The user was already authenticated before enrolling, and
+ * turning on a second factor does not re-authenticate them. Login-time
+ * MFA is the next prompt's work.
+ */
+export async function verifyTotpSetupController(
+  req: Request,
+  res: Response,
+) {
+  if (!req.auth) {
+    throw new AppError(
+      401,
+      "Authentication required",
+    );
+  }
+
+  const input =
+    verifyTotpSetupSchema.parse(
+      req.body,
+    );
+
+  await verifyTotpSetup(
+    req.auth.userId,
+
+    input.code,
+
+    {
+      applicationId:
+        req.auth.applicationId,
+
+      ipAddress:
+        req.ip ?? null,
+
+      userAgent:
+        req.get("user-agent") ??
+        null,
+    },
+  );
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      "Two-factor authentication is now enabled for your account.",
+
+    data: {
+      verified: true,
     },
   });
 }

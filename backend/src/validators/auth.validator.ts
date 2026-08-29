@@ -89,6 +89,20 @@ export const forgotPasswordSchema =
     email: emailSchema,
   });
 
+export const verifyTotpSetupSchema =
+  z.object({
+    // Digits only, but the length is not pinned to 6 here — the service
+    // owns the TOTP parameters, and a validator that hardcodes 6 would
+    // silently start rejecting valid codes if that ever changes.
+    code: z
+      .string()
+      .trim()
+      .regex(
+        /^\d{6,8}$/,
+        "Enter the 6-digit code from your authenticator app",
+      ),
+  });
+
 export const changePasswordSchema =
   z.object({
     // Only length-bounded, not policy-checked: this is an existing
@@ -130,6 +144,9 @@ export type ResetPasswordInput =
 
 export type ChangePasswordInput =
   z.infer<typeof changePasswordSchema>;
+
+export type VerifyTotpSetupInput =
+  z.infer<typeof verifyTotpSetupSchema>;
 
 export type VerifyEmailInput =
   z.infer<typeof verifyEmailSchema>;

@@ -5,6 +5,7 @@ import {
 import {
   changePasswordController,
   enrollTotpController,
+  verifyTotpSetupController,
   forgotPasswordController,
   loginController,
   logoutController,
@@ -43,6 +44,7 @@ import {
   forgotPasswordIpLimiter,
   resendVerificationEmailLimiter,
   resendVerificationIpLimiter,
+  mfaCodeLimiter,
   resetPasswordLimiter,
   signupLimiter,
   verifyEmailLimiter,
@@ -196,6 +198,20 @@ authRouter.post(
 
   asyncHandler(
     enrollTotpController,
+  ),
+);
+
+// Rate-limited unlike the enroll step: this one accepts a guessable
+// 6-digit secret. See mfaCodeLimiter.
+authRouter.post(
+  "/mfa/totp/verify-setup",
+
+  verifyRequestOrigin,
+  mfaCodeLimiter,
+  requireAuth,
+
+  asyncHandler(
+    verifyTotpSetupController,
   ),
 );
 

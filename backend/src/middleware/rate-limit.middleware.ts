@@ -235,6 +235,39 @@ export const resetPasswordLimiter =
     },
   });
 
+/**
+ * MFA code submission.
+ *
+ * A 6-digit code is one in a million, and `window: 1` makes three of them
+ * valid at any instant — so an unthrottled endpoint is guessable in the
+ * order of hundreds of thousands of requests, which is an afternoon, not a
+ * lifetime. This limit is the only thing standing between an attacker and
+ * that: `MfaMethod` has no attempts counter in the schema (unlike
+ * `OneTimeToken`, which does), so there is no per-account lockout to fall
+ * back on.
+ *
+ * Keyed on IP, which is the weaker half of the story — an attacker with a
+ * pool of addresses gets a multiple of this budget. A per-method attempt
+ * counter is the real fix and needs a schema change; flagged rather than
+ * improvised.
+ */
+export const mfaCodeLimiter =
+  rateLimit({
+    ...commonOptions,
+
+    windowMs:
+      15 * 60 * 1000,
+
+    max: 10,
+
+    message: {
+      success: false,
+
+      message:
+        "Too many verification attempts. Try again later.",
+    },
+  });
+
 export const oauthLimiter =
   rateLimit({
     ...commonOptions,
