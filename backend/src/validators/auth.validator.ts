@@ -8,7 +8,12 @@ const emailSchema = z
     value.toLowerCase(),
   );
 
-const passwordSchema = z
+/**
+ * The one password policy. Exported so every path that sets a password —
+ * signup, reset, and any future change-password — enforces exactly these
+ * rules; a second copy would drift the moment one of them is tightened.
+ */
+export const passwordSchema = z
   .string()
   .min(
     8,
@@ -84,6 +89,18 @@ export const forgotPasswordSchema =
     email: emailSchema,
   });
 
+export const resetPasswordSchema =
+  z.object({
+    token: z
+      .string()
+      .trim()
+      .min(1, "Reset token is required")
+      .max(512),
+
+    // Same passwordSchema signup uses — see the note on it.
+    newPassword: passwordSchema,
+  });
+
 export type SignupInput =
   z.infer<typeof signupSchema>;
 
@@ -92,6 +109,9 @@ export type ResendVerificationInput =
 
 export type ForgotPasswordInput =
   z.infer<typeof forgotPasswordSchema>;
+
+export type ResetPasswordInput =
+  z.infer<typeof resetPasswordSchema>;
 
 export type VerifyEmailInput =
   z.infer<typeof verifyEmailSchema>;

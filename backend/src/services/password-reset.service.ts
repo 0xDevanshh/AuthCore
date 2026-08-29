@@ -8,7 +8,16 @@ import { prisma } from "../config/prisma.ts";
 import { env } from "../config/env.ts";
 import { logger } from "../config/logger.ts";
 
-import { generateOneTimeToken } from "../utils/token.ts";
+import { AppError } from "../utils/app-error.ts";
+
+import { hashPassword } from "../utils/password.ts";
+
+import {
+  generateOneTimeToken,
+  hashOpaqueToken,
+} from "../utils/token.ts";
+
+import { revokeAllUserSessions } from "./session.service.ts";
 
 import {
   buildPasswordResetUrl,
@@ -214,4 +223,203 @@ export async function requestPasswordReset(
       oauthOnlyAccount: isOAuthOnly,
     },
   });
+}
+
+const SERIALIZABLE = {
+  isolationLevel:
+    Prisma.TransactionIsolationLevel.Serializable,
+} as const;
+
+const RESET_REVOKE_REASON =
+  "PASSWORD_RESET";
+
+/**
+ * Completes a password reset.
+ *
+ * Failure handling matches verifyEmail and acceptInvitation: a distinct
+ * code per rejection so the frontend can offer the right next step —
+ * request a new link, or go log in.
+ *
+ * THE SESSION REVOCATION IS THE POINT, not a tidy-up. A reset is what
+ * someone does when they believe their account is compromised, and an
+ * attacker who is already holding a valid session would otherwise keep it
+ * after the password changed — the new password would lock out the owner's
+ * future logins and nobody else. It runs inside the same transaction as
+ * the password write, so there is no committed state in which the password
+ * has changed but the old sessions are still live.
+ *
+ * NOT auto-logged-in. This deliberately issues no tokens; the user logs in
+ * fresh with the new password. Auto-login after reset is a reasonable UX
+ * improvement — it is what most consumer products do — and the pieces are
+ * all here (`createSession` takes a userId), but it is out of scope for
+ * this prompt. Whoever adds it should note that it would mean minting a
+ * session for a request authenticated only by an emailed token, which is
+ * a slightly different trust statement than the reset itself.
+ *
+ * MFA IS NOT CONSIDERED HERE. If the account carries an enrolled MFA
+ * method, a reset by email alone still changes the password and still
+ * revokes sessions. Whether a reset should require an MFA challenge, or
+ * whether it should disenroll MFA, is Phase 7's decision — deliberately
+ * untouched rather than guessed at.
+ */
+export async function resetPassword(
+  rawToken: string,
+  newPassword: string,
+  applicationId: string,
+  metadata: {
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  } = {},
+): Promise<void> {
+  const tokenHash = hashOpaqueToken(
+    rawToken.trim(),
+  );
+
+  // Read the token BEFORE hashing the new password. Argon2id at 64MB and
+  // t=3 is deliberately expensive, and this endpoint is public — hashing
+  // first would let anyone spend that memory and CPU with a junk token.
+  // The authoritative check is still the guarded update inside the
+  // transaction below; this one only avoids the wasted work.
+  const candidate =
+    await prisma.oneTimeToken.findUnique({
+      where: { tokenHash },
+
+      select: {
+        id: true,
+        userId: true,
+        purpose: true,
+        usedAt: true,
+        expiresAt: true,
+      },
+    });
+
+  // A token of another purpose — an email verification, say — must not
+  // set a password, and is reported as if it did not exist rather than
+  // confirming some other token by that value is live.
+  if (
+    !candidate ||
+    candidate.purpose !==
+      TokenPurpose.PASSWORD_RESET
+  ) {
+    throw new AppError(
+      400,
+      "Password reset link is not valid",
+      "RESET_TOKEN_NOT_FOUND",
+    );
+  }
+
+  if (candidate.usedAt) {
+    throw new AppError(
+      400,
+      "This password reset link has already been used",
+      "RESET_TOKEN_ALREADY_USED",
+    );
+  }
+
+  if (candidate.expiresAt <= new Date()) {
+    throw new AppError(
+      400,
+      "This password reset link has expired",
+      "RESET_TOKEN_EXPIRED",
+    );
+  }
+
+  // Outside the transaction for the same reason: a ~100ms CPU-bound KDF
+  // should not be run with a Serializable transaction held open.
+  const passwordHash =
+    await hashPassword(newPassword);
+
+  const revokedSessions =
+    await prisma.$transaction(async (tx) => {
+      // Guarded on usedAt: null so two concurrent redemptions of the same
+      // link cannot both set a password — the construction verifyEmail
+      // and acceptInvitation use. This, not the read above, is what makes
+      // the token single-use.
+      const consumed =
+        await tx.oneTimeToken.updateMany({
+          where: {
+            id: candidate.id,
+            usedAt: null,
+          },
+
+          data: { usedAt: new Date() },
+        });
+
+      if (consumed.count !== 1) {
+        throw new AppError(
+          400,
+          "This password reset link has already been used",
+          "RESET_TOKEN_ALREADY_USED",
+        );
+      }
+
+      await tx.user.update({
+        where: { id: candidate.userId },
+        data: { passwordHash },
+      });
+
+      // Same operation reuse detection performs, widened to the account.
+      const revoked =
+        await revokeAllUserSessions(
+          candidate.userId,
+          RESET_REVOKE_REASON,
+          tx,
+        );
+
+      await logAuditEvent({
+        tx,
+
+        action: "PASSWORD_RESET_COMPLETED",
+        actorType: AuditActorType.USER,
+
+        applicationId,
+        userId: candidate.userId,
+
+        resourceType: "User",
+        resourceId: candidate.userId,
+
+        ipAddress: metadata.ipAddress ?? null,
+        userAgent: metadata.userAgent ?? null,
+
+        metadata: {
+          tokenId: candidate.id,
+          sessionsRevoked: revoked,
+        },
+      });
+
+      // A separate entry from the reset itself: "every session died at
+      // this moment" is the line someone reconstructing an incident looks
+      // for, and it should be findable by action rather than by reading
+      // the metadata of another event.
+      await logAuditEvent({
+        tx,
+
+        action: "SESSIONS_REVOKED",
+        actorType: AuditActorType.USER,
+
+        applicationId,
+        userId: candidate.userId,
+
+        resourceType: "User",
+        resourceId: candidate.userId,
+
+        ipAddress: metadata.ipAddress ?? null,
+        userAgent: metadata.userAgent ?? null,
+
+        metadata: {
+          reason: RESET_REVOKE_REASON,
+          sessionsRevoked: revoked,
+        },
+      });
+
+      return revoked;
+    }, SERIALIZABLE);
+
+  logger.info(
+    {
+      userId: candidate.userId,
+      sessionsRevoked: revokedSessions,
+    },
+    "Password reset completed",
+  );
 }

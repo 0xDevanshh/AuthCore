@@ -162,6 +162,73 @@ async function revokeFamily(
   ]);
 }
 
+/**
+ * Revokes every live session and refresh token a user holds.
+ *
+ * The same "kill everything" operation `revokeFamily` performs on reuse
+ * detection, widened from one token family to the whole account: same
+ * columns, same idempotent `revokedAt: null` guards, same recording of a
+ * reason. `revokeFamily` stays as it is because reuse detection should
+ * burn the compromised family, not sign the user out everywhere.
+ *
+ * Takes an optional `tx` so a caller can make the revocation atomic with
+ * the change that motivated it — a password reset must not be able to
+ * commit while leaving the attacker's session alive.
+ *
+ * Refresh tokens are revoked by session id rather than by a relation
+ * filter because Prisma's `updateMany` does not accept one.
+ */
+export async function revokeAllUserSessions(
+  userId: string,
+  reason: string,
+  tx?: Prisma.TransactionClient,
+): Promise<number> {
+  const client = tx ?? prisma;
+
+  const now = new Date();
+
+  const sessions =
+    await client.session.findMany({
+      where: {
+        userId,
+        revokedAt: null,
+      },
+
+      select: { id: true },
+    });
+
+  if (sessions.length === 0) {
+    return 0;
+  }
+
+  const sessionIds = sessions.map(
+    (session) => session.id,
+  );
+
+  await client.session.updateMany({
+    where: {
+      id: { in: sessionIds },
+      revokedAt: null,
+    },
+
+    data: {
+      revokedAt: now,
+      revokeReason: reason,
+    },
+  });
+
+  await client.refreshToken.updateMany({
+    where: {
+      sessionId: { in: sessionIds },
+      revokedAt: null,
+    },
+
+    data: { revokedAt: now },
+  });
+
+  return sessionIds.length;
+}
+
 export async function rotateRefreshToken(
   rawRefreshToken: string,
 ): Promise<AuthTokens> {

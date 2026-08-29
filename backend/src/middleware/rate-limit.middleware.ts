@@ -209,6 +209,32 @@ export const forgotPasswordIpLimiter =
     },
   });
 
+/**
+ * Reset completion is keyed on IP, not on an email — the body carries a
+ * token, not an address.
+ *
+ * Worth limiting for a reason the other token endpoints do not share:
+ * every request that clears the token pre-check runs argon2id at 64MB, so
+ * an unlimited endpoint is a memory-and-CPU amplifier as much as a
+ * guessing surface.
+ */
+export const resetPasswordLimiter =
+  rateLimit({
+    ...commonOptions,
+
+    windowMs:
+      15 * 60 * 1000,
+
+    max: 10,
+
+    message: {
+      success: false,
+
+      message:
+        "Too many password reset attempts. Try again later.",
+    },
+  });
+
 export const oauthLimiter =
   rateLimit({
     ...commonOptions,

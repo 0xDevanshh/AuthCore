@@ -7,12 +7,14 @@ import {
   forgotPasswordSchema,
   loginSchema,
   resendVerificationSchema,
+  resetPasswordSchema,
   signupSchema,
   verifyEmailSchema,
 } from "../validators/auth.validator.ts";
 
 import {
   requestPasswordReset,
+  resetPassword,
 } from "../services/password-reset.service.ts";
 
 import {
@@ -217,6 +219,57 @@ export async function forgotPasswordController(
 
     message:
       "If an account with that email exists, a password reset link has been sent.",
+  });
+}
+
+/**
+ * Public — the user has no session at this point, which is the whole
+ * premise of forgot-password. The token is the credential.
+ *
+ * Unlike forgot-password, this one DOES report failures distinctly: the
+ * caller already holds a token, so telling them it expired leaks nothing
+ * about which accounts exist, and "request a new link" is the only useful
+ * thing to say.
+ *
+ * No tokens are issued and no cookies are set — the user logs in fresh.
+ * See the note on resetPassword about auto-login.
+ */
+export async function resetPasswordController(
+  req: Request,
+  res: Response,
+) {
+  const input =
+    resetPasswordSchema.parse(
+      req.body,
+    );
+
+  await resetPassword(
+    input.token,
+
+    input.newPassword,
+
+    requireApplicationId(req),
+
+    {
+      ipAddress:
+        req.ip ?? null,
+
+      userAgent:
+        req.get("user-agent") ??
+        null,
+    },
+  );
+
+  // Any session the client still holds was just revoked server-side;
+  // clearing the cookies keeps the browser from presenting a dead token
+  // on the next request.
+  clearAuthCookies(res);
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      "Password reset successfully. You can now log in with your new password.",
   });
 }
 

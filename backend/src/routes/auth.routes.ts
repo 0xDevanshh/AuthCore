@@ -9,6 +9,7 @@ import {
   meController,
   refreshController,
   resendVerificationController,
+  resetPasswordController,
   signupController,
   verifyEmailController,
 } from "../controllers/auth.controller.ts";
@@ -40,6 +41,7 @@ import {
   forgotPasswordIpLimiter,
   resendVerificationEmailLimiter,
   resendVerificationIpLimiter,
+  resetPasswordLimiter,
   signupLimiter,
   verifyEmailLimiter,
 } from "../middleware/rate-limit.middleware.ts";
@@ -126,6 +128,20 @@ authRouter.post(
 
   asyncHandler(
     forgotPasswordController,
+  ),
+);
+
+// Public, through resolveApplication — no requireAuth, since having no
+// usable session is the premise of the whole flow.
+authRouter.post(
+  "/reset-password",
+
+  verifyRequestOrigin,
+  resetPasswordLimiter,
+  resolveApplication,
+
+  asyncHandler(
+    resetPasswordController,
   ),
 );
 
