@@ -18,7 +18,13 @@ export const routes = {
   auditLogs: (applicationId: string) => `/applications/${applicationId}/audit-logs`,
   invitations: (applicationId: string) => `/applications/${applicationId}/invitations`,
   settings: "/settings",
+
+  // Unauthenticated routes, under the (auth) route group.
   login: "/login",
+  signup: "/signup",
+  forgotPassword: "/forgot-password",
+  resetPassword: "/reset-password",
+  verifyEmail: "/verify-email",
 } as const
 
 /**

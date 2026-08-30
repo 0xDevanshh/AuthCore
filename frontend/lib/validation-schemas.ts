@@ -104,6 +104,74 @@ export const changePasswordSchema = z.object({
   newPassword: passwordSchema,
 })
 
+/* ==========================================================================
+ * Client-only form schemas
+ * ==========================================================================
+ *
+ * These have no backend counterpart — they describe what a *form* collects,
+ * which is not always what the endpoint receives. Each one is shaped so its
+ * output can be handed to the API unchanged.
+ */
+
+/**
+ * Optional name field.
+ *
+ * The backend's rule is `.trim().min(1).max(50).optional()`, which an empty
+ * input does NOT satisfy: an untouched field yields "", and "" fails min(1)
+ * rather than reading as absent. So the empty case is mapped to undefined here
+ * and the field is simply omitted from the request.
+ */
+const optionalNameSchema = z
+  .string()
+  .trim()
+  .max(50, "Cannot exceed 50 characters")
+  .transform((value) => (value.length === 0 ? undefined : value))
+
+export const signupFormSchema = z.object({
+  firstName: optionalNameSchema,
+  lastName: optionalNameSchema,
+  email: emailSchema,
+  password: passwordSchema,
+})
+
+/**
+ * Reset form: the token comes from the URL, not the form, so only the two
+ * password fields are collected. `confirmPassword` is a client-side guard
+ * against typos and is never sent.
+ */
+export const resetPasswordFormSchema = z
+  .object({
+    newPassword: passwordSchema,
+    confirmPassword: z.string().min(1, "Confirm your new password"),
+  })
+  .refine((values) => values.newPassword === values.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  })
+
+/**
+ * The code half of the MFA challenge — the challenge token is held in component
+ * state, not in the form. Bounds only, for the reason on `mfaChallengeSchema`:
+ * this one input accepts a TOTP code or a recovery code.
+ */
+export const mfaCodeFormSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(1, "Enter your authenticator code or a recovery code")
+    .max(64),
+})
+
+/**
+ * Input and output differ here because the name fields transform "" to
+ * undefined: the form is typed on the input side (every field a string, so RHF
+ * can hold controlled inputs), while the submit handler receives the output.
+ */
+export type SignupFormInput = z.input<typeof signupFormSchema>
+export type SignupFormOutput = z.output<typeof signupFormSchema>
+export type ResetPasswordFormInput = z.infer<typeof resetPasswordFormSchema>
+export type MfaCodeFormInput = z.infer<typeof mfaCodeFormSchema>
+
 export type SignupInput = z.infer<typeof signupSchema>
 export type LoginInput = z.infer<typeof loginSchema>
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>
