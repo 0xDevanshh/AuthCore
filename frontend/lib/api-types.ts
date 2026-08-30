@@ -64,3 +64,40 @@ export type SignupResponseData = {
 export type UserResponseData = {
   user: SafeUser
 }
+
+export type ApplicationStatus = "ACTIVE" | "SUSPENDED" | "DELETED"
+
+/**
+ * Mirrors the Prisma `Application` model, which
+ * `listApplicationsForUser`/`getApplicationForUser` return unshaped — every
+ * scalar column is on the wire. Dates arrive as ISO strings over JSON.
+ *
+ * Note there is no member count here: the list query has no `_count`, so a
+ * "N members" stat is not available from this endpoint without a second
+ * request per application.
+ */
+export type Application = {
+  id: string
+  ownerId: string
+  name: string
+  slug: string
+  status: ApplicationStatus
+  logoUrl: string | null
+  homepageUrl: string | null
+  allowedOrigins: string[]
+  redirectUris: string[]
+  accessTokenTtlSec: number
+  refreshTokenTtlSec: number
+  createdAt: string
+  updatedAt: string
+}
+
+/** GET /applications */
+export type ApplicationListResponseData = {
+  applications: Application[]
+}
+
+/** POST /applications, GET /applications/:id */
+export type ApplicationResponseData = {
+  application: Application
+}

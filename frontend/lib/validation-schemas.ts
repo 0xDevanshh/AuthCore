@@ -167,6 +167,20 @@ export const mfaCodeFormSchema = z.object({
  * undefined: the form is typed on the input side (every field a string, so RHF
  * can hold controlled inputs), while the submit handler receives the output.
  */
+/**
+ * Mirrors `createApplicationSchema` in
+ * backend/src/validators/application.validator.ts — trimmed, 1 to 80 characters.
+ */
+export const createApplicationSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, "Application name is required")
+    .max(80, "Application name cannot exceed 80 characters"),
+})
+
+export type CreateApplicationInput = z.infer<typeof createApplicationSchema>
+
 export type SignupFormInput = z.input<typeof signupFormSchema>
 export type SignupFormOutput = z.output<typeof signupFormSchema>
 export type ResetPasswordFormInput = z.infer<typeof resetPasswordFormSchema>
