@@ -14,7 +14,8 @@ export type ApplicationSummary = {
 export const routes = {
   applications: "/applications",
   application: (applicationId: string) => `/applications/${applicationId}`,
-  team: (applicationId: string) => `/applications/${applicationId}/team`,
+  apiKeys: (applicationId: string) => `/applications/${applicationId}/api-keys`,
+  team: (applicationId: string) => `/applications/${applicationId}/members`,
   auditLogs: (applicationId: string) => `/applications/${applicationId}/audit-logs`,
   invitations: (applicationId: string) => `/applications/${applicationId}/invitations`,
   settings: "/settings",

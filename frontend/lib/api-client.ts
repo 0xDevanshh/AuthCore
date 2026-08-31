@@ -181,6 +181,15 @@ export function getApiErrorCode(error: unknown): string | undefined {
     : undefined
 }
 
+/**
+ * HTTP status of a failed request, or undefined when the request never got a
+ * response (network failure, CORS rejection, timeout) — a case worth
+ * distinguishing from a real 4xx/5xx.
+ */
+export function getApiErrorStatus(error: unknown): number | undefined {
+  return axios.isAxiosError(error) ? error.response?.status : undefined
+}
+
 /** Human-readable message from an error response, with a sane fallback. */
 export function getApiErrorMessage(
   error: unknown,

@@ -101,3 +101,38 @@ export type ApplicationListResponseData = {
 export type ApplicationResponseData = {
   application: Application
 }
+
+export type MemberStatus = "ACTIVE" | "INVITED" | "SUSPENDED"
+
+/** Mirrors `MemberSummary` in backend/src/services/member.service.ts. */
+export type MemberSummary = {
+  membershipId: string
+  userId: string
+  status: MemberStatus
+  /** Role names, e.g. ["Owner"]. */
+  roles: string[]
+  joinedAt: string
+}
+
+/** GET /applications/:id/members — gated on the member:list permission. */
+export type MemberListResponseData = {
+  members: MemberSummary[]
+}
+
+/**
+ * What `serializeApiKey` in api-key.controller.ts actually emits — deliberately
+ * narrower than the Prisma model. The secret itself is returned once, at
+ * creation, and never again; the list carries only the prefix.
+ */
+export type ApiKeySummary = {
+  id: string
+  name: string
+  prefix: string
+  createdAt: string
+  revokedAt: string | null
+}
+
+/** GET /applications/:id/keys — gated on the apikey:list permission. */
+export type ApiKeyListResponseData = {
+  apiKeys: ApiKeySummary[]
+}
