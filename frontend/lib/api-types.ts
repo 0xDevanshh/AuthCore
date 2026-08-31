@@ -136,3 +136,20 @@ export type ApiKeySummary = {
 export type ApiKeyListResponseData = {
   apiKeys: ApiKeySummary[]
 }
+
+/**
+ * POST /applications/:id/keys.
+ *
+ * `rawKey` is the only time the secret exists outside the caller's hands — the
+ * backend stores a hash and has no way to reproduce it. If it is not copied
+ * before this response is discarded, it is gone and a new key must be created.
+ */
+export type ApiKeyCreateResponseData = {
+  apiKey: ApiKeySummary
+  rawKey: string
+}
+
+/** DELETE /applications/:id/keys/:keyId — returns the key with revokedAt set. */
+export type ApiKeyRevokeResponseData = {
+  apiKey: ApiKeySummary
+}
