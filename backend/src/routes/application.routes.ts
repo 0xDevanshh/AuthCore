@@ -18,6 +18,8 @@ import { memberRouter } from "./member.routes.ts";
 
 import { invitationRouter } from "./invitation.routes.ts";
 
+import { auditRouter } from "./audit.routes.ts";
+
 export const applicationRouter = Router();
 
 // Control plane: every route here is the developer's dashboard session,
@@ -60,4 +62,9 @@ applicationRouter.use(
 applicationRouter.use(
   "/:id/invitations",
   invitationRouter,
+);
+
+applicationRouter.use(
+  "/:id/audit-logs",
+  auditRouter,
 );
