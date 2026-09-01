@@ -153,3 +153,46 @@ export type ApiKeyCreateResponseData = {
 export type ApiKeyRevokeResponseData = {
   apiKey: ApiKeySummary
 }
+
+/** A role belonging to one Application. Roles are seeded per application. */
+export type ApplicationRole = {
+  id: string
+  name: string
+}
+
+/**
+ * Mirrors `PendingInvitationSummary` in
+ * backend/src/services/invitation.service.ts.
+ *
+ * `invitedBy` is a bare userId — like the members list, there is no user
+ * lookup, so it cannot be resolved to a name.
+ */
+export type PendingInvitation = {
+  id: string
+  invitedEmail: string
+  roleId: string
+  roleName: string
+  invitedBy: string
+  createdAt: string
+  expiresAt: string
+}
+
+/** GET /applications/:id/invitations — gated on the member:invite permission. */
+export type InvitationListResponseData = {
+  invitations: PendingInvitation[]
+}
+
+/**
+ * POST /applications/:id/invitations.
+ *
+ * Note this is *narrower* than the list row — no roleId, roleName or
+ * invitedBy — so the new row cannot be assembled from it alone.
+ */
+export type InvitationCreateResponseData = {
+  invitation: {
+    id: string
+    email: string
+    createdAt: string
+    expiresAt: string
+  }
+}

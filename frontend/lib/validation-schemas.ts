@@ -181,6 +181,18 @@ export const createApplicationSchema = z.object({
 
 export type CreateApplicationInput = z.infer<typeof createApplicationSchema>
 
+/**
+ * Mirrors `sendInvitationSchema` in
+ * backend/src/validators/application.validator.ts — the email is lowercased
+ * there too, and `roleId` is a required id (a role *name* is rejected).
+ */
+export const sendInvitationSchema = z.object({
+  email: emailSchema,
+  roleId: z.string().trim().min(1, "Choose a role").max(64),
+})
+
+export type SendInvitationInput = z.infer<typeof sendInvitationSchema>
+
 export type SignupFormInput = z.input<typeof signupFormSchema>
 export type SignupFormOutput = z.output<typeof signupFormSchema>
 export type ResetPasswordFormInput = z.infer<typeof resetPasswordFormSchema>
