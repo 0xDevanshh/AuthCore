@@ -19,6 +19,9 @@ export const routes = {
   auditLogs: (applicationId: string) => `/applications/${applicationId}/audit-logs`,
   invitations: (applicationId: string) => `/applications/${applicationId}/invitations`,
   settings: "/settings",
+  settingsProfile: "/settings/profile",
+  settingsSecurity: "/settings/security",
+  settingsMfa: "/settings/mfa",
 
   // Unauthenticated routes, under the (auth) route group.
   login: "/login",

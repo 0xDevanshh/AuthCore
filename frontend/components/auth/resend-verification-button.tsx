@@ -4,7 +4,11 @@ import * as React from "react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { apiClient, getApiErrorMessage } from "@/lib/api-client"
+import {
+  apiClient,
+  getApiErrorMessage,
+  isMissingApiKeyError,
+} from "@/lib/api-client"
 
 const COOLDOWN_SECONDS = 60
 
@@ -51,7 +55,15 @@ export function ResendVerificationButton({ email }: { email: string }) {
       setNotice(response.data.message ?? "Verification email sent.")
       setSecondsLeft(COOLDOWN_SECONDS)
     } catch (caught) {
-      setError(getApiErrorMessage(caught, "Could not resend the email."))
+      // Same gap noted throughout lib/api-client.ts: this endpoint still sits
+      // behind resolveApplication, so it 401s for every caller today,
+      // authenticated or not. Named explicitly rather than as a generic
+      // failure — used here from both the signup flow and account settings.
+      setError(
+        isMissingApiKeyError(caught)
+          ? "This AuthCore instance is not accepting verification emails yet. See the note in lib/api-client.ts."
+          : getApiErrorMessage(caught, "Could not resend the email."),
+      )
     } finally {
       setIsSending(false)
     }
