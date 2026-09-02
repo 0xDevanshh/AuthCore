@@ -150,6 +150,22 @@ export const resetPasswordFormSchema = z
   })
 
 /**
+ * Change-password form (authenticated, settings page) — same shape as
+ * changePasswordSchema plus a client-only confirmPassword, same reasoning as
+ * resetPasswordFormSchema's: it guards against a typo and is never sent.
+ */
+export const changePasswordFormSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Current password is required").max(128),
+    newPassword: passwordSchema,
+    confirmPassword: z.string().min(1, "Confirm your new password"),
+  })
+  .refine((values) => values.newPassword === values.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  })
+
+/**
  * The code half of the MFA challenge — the challenge token is held in component
  * state, not in the form. Bounds only, for the reason on `mfaChallengeSchema`:
  * this one input accepts a TOTP code or a recovery code.
@@ -196,6 +212,7 @@ export type SendInvitationInput = z.infer<typeof sendInvitationSchema>
 export type SignupFormInput = z.input<typeof signupFormSchema>
 export type SignupFormOutput = z.output<typeof signupFormSchema>
 export type ResetPasswordFormInput = z.infer<typeof resetPasswordFormSchema>
+export type ChangePasswordFormInput = z.infer<typeof changePasswordFormSchema>
 export type MfaCodeFormInput = z.infer<typeof mfaCodeFormSchema>
 
 export type SignupInput = z.infer<typeof signupSchema>

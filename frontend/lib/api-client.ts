@@ -226,11 +226,24 @@ export function getApiFieldErrors(
 /*
  * Endpoints that must never trigger the refresh-and-retry dance.
  *
- * /auth/refresh itself would recurse. /auth/login and /auth/me legitimately
- * answer 401 on bad credentials or no session, and retrying those would turn a
- * normal "wrong password" into a spurious refresh attempt and a redirect.
+ * /auth/refresh itself would recurse. /auth/login and /auth/change-password
+ * legitimately answer 401 for a wrong password — a credential check, not an
+ * expired session — and retrying would silently refresh (which succeeds, since
+ * the session is fine) and resubmit the same wrong password, doubling latency
+ * to arrive at the same rejection. /auth/logout has no session left to refresh
+ * for by the time it matters.
+ *
+ * /auth/me is deliberately NOT here: an expired access token there should be
+ * silently refreshed so a returning visitor's session is restored. It opts out
+ * of the *redirect* instead, per-request, via `suppressLoginRedirect` — see
+ * auth-context.tsx.
  */
-const NO_REFRESH_PATHS = ["/auth/refresh", "/auth/login", "/auth/logout"]
+const NO_REFRESH_PATHS = [
+  "/auth/refresh",
+  "/auth/login",
+  "/auth/logout",
+  "/auth/change-password",
+]
 
 function shouldSkipRefresh(url: string | undefined): boolean {
   if (!url) {
