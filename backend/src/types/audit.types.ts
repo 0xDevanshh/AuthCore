@@ -26,6 +26,11 @@ export const AUDIT_ACTIONS = [
   "EMAIL_VERIFIED",
   "MFA_ENROLLMENT_STARTED",
   "MFA_ENABLED",
+  // Security-sensitive: worth being loud about, since it's the kind of event
+  // that should stand out to anyone reviewing an account's history — a second
+  // factor going away is exactly the moment an attacker with partial access
+  // would want to create.
+  "MFA_DISABLED",
   "MFA_CHALLENGE_ISSUED",
   "MFA_CHALLENGE_SUCCESS",
   "MFA_CHALLENGE_FAILED",

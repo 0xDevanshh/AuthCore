@@ -4,6 +4,7 @@ import {
 
 import {
   changePasswordController,
+  disableTotpController,
   enrollTotpController,
   verifyTotpSetupController,
   forgotPasswordController,
@@ -233,6 +234,22 @@ authRouter.post(
 
   asyncHandler(
     verifyTotpSetupController,
+  ),
+);
+
+// Settings-page action, requireAuth only — like change-password, not
+// mfaCodeLimiter: at this point the caller already holds a session, which is
+// a materially higher bar than the pre-auth endpoints that limiter guards, and
+// change-password (the same "verify a credential you already hold" shape)
+// sets the precedent of relying on requireAuth alone here.
+authRouter.post(
+  "/mfa/disable",
+
+  verifyRequestOrigin,
+  requireAuth,
+
+  asyncHandler(
+    disableTotpController,
   ),
 );
 

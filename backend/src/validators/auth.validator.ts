@@ -124,6 +124,29 @@ export const verifyTotpSetupSchema =
     code: totpCodeSchema,
   });
 
+/**
+ * Body for disabling TOTP. Exactly one of the two proofs must be present —
+ * neither, or both, is rejected before the service ever sees it.
+ */
+export const disableTotpSchema = z
+  .object({
+    // Same reasoning as changePasswordSchema.currentPassword: an existing
+    // credential being presented, not one being set, so it is bounded only
+    // and not run through the password policy.
+    password: z.string().min(1).max(128).optional(),
+
+    // TOTP-only, unlike mfaChallengeSchema.code — there is no recovery-code
+    // path for disabling MFA. Digits only, per totpCodeSchema.
+    totpCode: totpCodeSchema.optional(),
+  })
+  .refine(
+    (value) => Boolean(value.password) !== Boolean(value.totpCode),
+    {
+      message:
+        "Provide either your password or a code from your authenticator app",
+    },
+  );
+
 export const changePasswordSchema =
   z.object({
     // Only length-bounded, not policy-checked: this is an existing
@@ -168,6 +191,9 @@ export type ChangePasswordInput =
 
 export type VerifyTotpSetupInput =
   z.infer<typeof verifyTotpSetupSchema>;
+
+export type DisableTotpInput =
+  z.infer<typeof disableTotpSchema>;
 
 export type MfaChallengeInput =
   z.infer<typeof mfaChallengeSchema>;

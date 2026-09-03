@@ -22,7 +22,11 @@ import {
   hashOpaqueToken,
 } from "../utils/token.ts";
 
+import { verifyPassword } from "../utils/password.ts";
+
 import { logAuditEvent } from "./audit.service.ts";
+
+import { revokeAllUserSessions } from "./session.service.ts";
 
 /**
  * SCHEMA NOTES — read before extending this file.
@@ -397,6 +401,211 @@ export async function getMfaStatus(
     enabled: method !== null,
     enrolledAt: method?.verifiedAt.toISOString() ?? null,
   };
+}
+
+const DISABLE_REVOKE_REASON = "MFA_DISABLED";
+
+/**
+ * Turns TOTP off for an account.
+ *
+ * DELETION CHOICE — the row is soft-deleted (`enabled: false`), matching the
+ * ApiKey revoke pattern the caller asked to be consistent with, but with one
+ * addition that pattern doesn't need: `secretEnc` is nulled out at the same
+ * time. An ApiKey's stored value is a hash — revoking it and leaving the hash
+ * in place reveals nothing, because a hash cannot be run backwards into a
+ * working key. A TOTP secret is the opposite: per the SECURITY DEBT note at
+ * the top of this file, `secretEnc` is PLAINTEXT, so a soft-delete that left
+ * it in place would leave a live, working second factor sitting in the
+ * database under a row that merely claims to be off. `enabled`/`verifiedAt`
+ * stay as a historical record (id, type, when it was set up, when it was
+ * turned off); the one field that would still work as a credential does not.
+ *
+ * Re-authentication is mandatory: either the account's current password or a
+ * valid code from the very method being removed, verified here rather than
+ * trusted from the caller. Disabling MFA is exactly what an attacker who has
+ * captured a session — but not the password or the phone — would want to do
+ * next, so a bare authenticated request must not be enough.
+ *
+ * Recovery codes are invalidated (deleted, matching the same replace-by-delete
+ * shape `generateRecoveryCodes` already uses below) because they are
+ * meaningless without an active method to recover *into* — keeping them would
+ * be a stray set of live credentials for a second factor that no longer
+ * exists. Every other session is revoked for the same reason `changePassword`
+ * revokes them: this is a security-relevant change to the account, and
+ * anywhere else the account is signed in should have to prove itself again.
+ */
+export async function disableTotp(
+  userId: string,
+  verification: {
+    password?: string;
+    totpCode?: string;
+  },
+  options: {
+    /** Session to keep alive — the one this request authenticated with. */
+    currentSessionId?: string | null;
+
+    applicationId?: string | null;
+
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  } = {},
+): Promise<void> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+
+    select: {
+      id: true,
+      passwordHash: true,
+      disabledAt: true,
+    },
+  });
+
+  // 401 rather than 404, same reasoning as changePassword: the caller
+  // authenticated, so the only thing this can mean is that the credential no
+  // longer holds.
+  if (!user || user.disabledAt) {
+    throw new AppError(
+      401,
+      "Authentication required",
+      "INVALID_CREDENTIALS",
+    );
+  }
+
+  const method = await getActiveTotpMethod(userId);
+
+  if (!method) {
+    throw new AppError(
+      400,
+      "Two-factor authentication is not enabled for this account",
+      "MFA_NOT_ENABLED",
+    );
+  }
+
+  let verified = false;
+
+  if (verification.password) {
+    verified = user.passwordHash
+      ? await verifyPassword(user.passwordHash, verification.password)
+      : false;
+  } else if (verification.totpCode) {
+    verified =
+      validateTotpCode(method.secretEnc, verification.totpCode) !== null;
+  }
+
+  // One message regardless of which proof was offered or why it failed —
+  // wrong password, wrong code, no password set on an OAuth-only account.
+  // Distinguishing those would tell an attacker which factor is worth
+  // attacking next, which is exactly the information this endpoint exists to
+  // withhold.
+  if (!verified) {
+    throw new AppError(
+      401,
+      "Could not verify your identity",
+      "MFA_REAUTH_FAILED",
+    );
+  }
+
+  const { recoveryCodesInvalidated, sessionsRevoked } =
+    await prisma.$transaction(async (tx) => {
+      // Guarded update, not a plain one: if this method was already disabled
+      // between the read above and this write (another request, another
+      // tab), the guard makes the second writer's update affect zero rows
+      // instead of silently repeating work that already happened.
+      const disabled = await tx.mfaMethod.updateMany({
+        where: {
+          id: method.id,
+          userId,
+          enabled: true,
+        },
+
+        data: {
+          enabled: false,
+          secretEnc: null,
+        },
+      });
+
+      if (disabled.count !== 1) {
+        throw new AppError(
+          400,
+          "Two-factor authentication is not enabled for this account",
+          "MFA_NOT_ENABLED",
+        );
+      }
+
+      const { count: recoveryCodesInvalidated } =
+        await tx.mfaRecoveryCode.deleteMany({
+          where: { userId },
+        });
+
+      const sessionsRevoked = await revokeAllUserSessions(
+        userId,
+        DISABLE_REVOKE_REASON,
+        tx,
+        options.currentSessionId ?? null,
+      );
+
+      await logAuditEvent({
+        tx,
+
+        action: "MFA_DISABLED",
+        actorType: AuditActorType.USER,
+
+        applicationId: options.applicationId ?? null,
+
+        userId,
+
+        resourceType: "MfaMethod",
+        resourceId: method.id,
+
+        ipAddress: options.ipAddress ?? null,
+        userAgent: options.userAgent ?? null,
+
+        metadata: {
+          recoveryCodesInvalidated,
+          sessionsRevoked,
+
+          currentSessionPreserved: Boolean(options.currentSessionId),
+        },
+      });
+
+      if (sessionsRevoked > 0) {
+        // Separate entry, as in changePassword and resetPassword — "every
+        // other session died at this moment" should be findable by action on
+        // its own, not only as a side note inside MFA_DISABLED's metadata.
+        await logAuditEvent({
+          tx,
+
+          action: "SESSIONS_REVOKED",
+          actorType: AuditActorType.USER,
+
+          applicationId: options.applicationId ?? null,
+
+          userId,
+
+          resourceType: "User",
+          resourceId: userId,
+
+          ipAddress: options.ipAddress ?? null,
+          userAgent: options.userAgent ?? null,
+
+          metadata: {
+            reason: DISABLE_REVOKE_REASON,
+            sessionsRevoked,
+          },
+        });
+      }
+
+      return { recoveryCodesInvalidated, sessionsRevoked };
+    });
+
+  logger.info(
+    {
+      userId,
+      recoveryCodesInvalidated,
+      sessionsRevoked,
+    },
+    "TOTP MFA disabled",
+  );
 }
 
 /**

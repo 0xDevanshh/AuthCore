@@ -5,6 +5,7 @@ import type {
 
 import {
   changePasswordSchema,
+  disableTotpSchema,
   forgotPasswordSchema,
   loginSchema,
   mfaChallengeSchema,
@@ -38,6 +39,7 @@ import {
 import {
   completeMfaLogin,
   countRemainingRecoveryCodes,
+  disableTotp,
   enrollTotp,
   generateRecoveryCodes,
   getMfaStatus,
@@ -655,6 +657,70 @@ export async function verifyTotpSetupController(
       // later. Only hashes are stored; there is nothing to re-fetch.
       recoveryCodesShownOnce: true,
     },
+  });
+}
+
+/**
+ * Turns TOTP off. requireAuth — the session is what authenticates the
+ * request, but see `disableTotp` for why that alone is not enough: the body
+ * must also carry the current password or a valid code from the very method
+ * being removed.
+ */
+export async function disableTotpController(
+  req: Request,
+  res: Response,
+) {
+  if (!req.auth) {
+    throw new AppError(
+      401,
+      "Authentication required",
+    );
+  }
+
+  const input =
+    disableTotpSchema.parse(
+      req.body,
+    );
+
+  await disableTotp(
+    req.auth.userId,
+
+    {
+      // exactOptionalPropertyTypes rejects an explicit `undefined` for an
+      // optional key, so the key is omitted entirely rather than assigned
+      // one — same pattern as createApiKeyController.
+      ...(input.password !== undefined
+        ? { password: input.password }
+        : {}),
+
+      ...(input.totpCode !== undefined
+        ? { totpCode: input.totpCode }
+        : {}),
+    },
+
+    {
+      // Spares the session this request arrived on — same reasoning as
+      // changePassword.
+      currentSessionId:
+        req.auth.sessionId,
+
+      applicationId:
+        req.auth.applicationId,
+
+      ipAddress:
+        req.ip ?? null,
+
+      userAgent:
+        req.get("user-agent") ??
+        null,
+    },
+  );
+
+  res.status(200).json({
+    success: true,
+
+    message:
+      "Two-factor authentication disabled. Other devices have been signed out.",
   });
 }
 
