@@ -196,3 +196,45 @@ export type InvitationCreateResponseData = {
     expiresAt: string
   }
 }
+
+/**
+ * POST /auth/mfa/totp/enroll.
+ *
+ * Mirrors `TotpEnrollment` in backend/src/services/mfa.service.ts. `secret` is
+ * plaintext — the manual-entry fallback for scanning the QR — and neither
+ * value is retrievable again once this response is gone: enrolling again
+ * replaces the pending method with a fresh secret rather than returning the
+ * old one.
+ */
+export type MfaEnrollResponseData = {
+  secret: string
+  qrCodeDataUrl: string
+  /** Always false here — the method is inert until verify-setup confirms it. */
+  verified: false
+}
+
+/**
+ * POST /auth/mfa/totp/verify-setup.
+ *
+ * `recoveryCodes` exists in the clear exactly once, in this response —
+ * verify-setup generates them as part of the same transaction that turns MFA
+ * on, and nothing stores them unhashed. `recoveryCodesShownOnce` is the
+ * backend's own signal that there is no view-again path, echoed here so nothing
+ * on this side has to assume it.
+ */
+export type MfaVerifySetupResponseData = {
+  verified: true
+  recoveryCodes: string[]
+  recoveryCodesShownOnce: true
+}
+
+/** POST /auth/mfa/recovery-codes/regenerate — same shape as verify-setup's codes. */
+export type MfaRegenerateRecoveryCodesResponseData = {
+  recoveryCodes: string[]
+  recoveryCodesShownOnce: true
+}
+
+/** GET /auth/mfa/recovery-codes/count. */
+export type MfaRecoveryCodesCountResponseData = {
+  remaining: number
+}

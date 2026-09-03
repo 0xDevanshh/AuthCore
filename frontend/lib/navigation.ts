@@ -21,7 +21,7 @@ export const routes = {
   settings: "/settings",
   settingsProfile: "/settings/profile",
   settingsSecurity: "/settings/security",
-  settingsMfa: "/settings/mfa",
+  settingsMfa: "/settings/two-factor",
 
   // Unauthenticated routes, under the (auth) route group.
   login: "/login",
