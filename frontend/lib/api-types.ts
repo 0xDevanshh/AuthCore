@@ -234,7 +234,14 @@ export type MfaRegenerateRecoveryCodesResponseData = {
   recoveryCodesShownOnce: true
 }
 
-/** GET /auth/mfa/recovery-codes/count. */
-export type MfaRecoveryCodesCountResponseData = {
-  remaining: number
+/**
+ * GET /auth/mfa/status.
+ *
+ * Mirrors `getMfaStatus` in backend/src/services/mfa.service.ts — deliberately
+ * minimal, no method type or device info. `enrolledAt` is an ISO string
+ * (the backend converts it before responding) and only present when enabled.
+ */
+export type MfaStatusResponseData = {
+  enabled: boolean
+  enrolledAt: string | null
 }

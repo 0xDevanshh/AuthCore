@@ -10,6 +10,7 @@ import {
   loginController,
   logoutController,
   mfaChallengeController,
+  mfaStatusController,
   recoveryCodesCountController,
   regenerateRecoveryCodesController,
   meController,
@@ -258,6 +259,19 @@ authRouter.get(
 
   asyncHandler(
     recoveryCodesCountController,
+  ),
+);
+
+// Read-only, no side effects — see the note on the controller for why this
+// exists separately from enroll, which is otherwise the only endpoint that
+// reveals whether TOTP is on.
+authRouter.get(
+  "/mfa/status",
+
+  requireAuth,
+
+  asyncHandler(
+    mfaStatusController,
   ),
 );
 

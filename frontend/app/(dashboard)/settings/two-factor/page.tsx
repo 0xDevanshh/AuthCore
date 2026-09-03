@@ -25,53 +25,14 @@ import {
 import type {
   ApiSuccess,
   MfaEnrollResponseData,
-  MfaRecoveryCodesCountResponseData,
+  MfaStatusResponseData,
 } from "@/lib/api-types"
-
-/*
- * =============================================================================
- * GAP — no endpoint answers "is 2FA already enabled?" without a side effect
- * =============================================================================
- *
- * Checked exhaustively before settling for a heuristic. Neither of these
- * exposes it:
- *
- *   GET /auth/me                  -> SafeUser has no mfa field at all.
- *   (nothing else reads MfaMethod) -> `getActiveTotpMethod` in mfa.service.ts
- *                                     is never wrapped by a controller/route.
- *
- * The only endpoint that would answer definitively is
- * POST /auth/mfa/totp/enroll itself — it throws 400 MFA_TOTP_ALREADY_ENROLLED
- * when a verified method exists — but calling it just to *check* status is
- * wrong on two counts: it mutates (creating a real pending secret) when the
- * account is NOT yet enrolled, and it would do that silently on every page
- * load rather than only when the user asks to enable 2FA.
- *
- * So this page uses the best available READ-ONLY proxy —
- * GET /auth/mfa/recovery-codes/count — as a heuristic:
- *
- *   remaining > 0  -> assume enabled (recovery codes only ever exist because
- *                     verify-setup or regenerate created them, both of which
- *                     require 2FA to already be on)
- *   remaining === 0 -> assume not enabled
- *
- * The failure mode is narrow and self-correcting: a user who has consumed
- * every one of their ~10 recovery codes (RECOVERY_CODE_COUNT) while TOTP
- * remains active would see the "not enabled" state. Clicking "Enable" then
- * calls enroll(), which answers truthfully with MFA_TOTP_ALREADY_ENROLLED —
- * caught below to flip the page to the correct state rather than showing a
- * bare error.
- *
- * The real fix is a cheap addition: GET /auth/mfa/status returning
- * `{ enabled: boolean }`, built on the existing (currently unused outside
- * mfa.service.ts) `getActiveTotpMethod`. Swap the heuristic below for that
- * call and delete this comment when it exists.
- */
+import { formatAbsoluteDate, formatRelativeTime } from "@/lib/format"
 
 type PageStatus =
   | { status: "loading" }
   | { status: "disabled" }
-  | { status: "enabled" }
+  | { status: "enabled"; enrolledAt: string | null }
   | { status: "error"; message: string }
 
 export default function TwoFactorSettingsPage() {
@@ -86,13 +47,13 @@ export default function TwoFactorSettingsPage() {
 
   const checkStatus = React.useCallback(async (): Promise<PageStatus> => {
     try {
-      const response = await apiClient.get<
-        ApiSuccess<MfaRecoveryCodesCountResponseData>
-      >("/auth/mfa/recovery-codes/count")
+      const response = await apiClient.get<ApiSuccess<MfaStatusResponseData>>(
+        "/auth/mfa/status",
+      )
 
-      return {
-        status: response.data.data.remaining > 0 ? "enabled" : "disabled",
-      }
+      const { enabled, enrolledAt } = response.data.data
+
+      return enabled ? { status: "enabled", enrolledAt } : { status: "disabled" }
     } catch (caught) {
       return {
         status: "error",
@@ -142,9 +103,14 @@ export default function TwoFactorSettingsPage() {
       setEnrollment(response.data.data)
     } catch (caught) {
       if (getApiErrorCode(caught) === "MFA_TOTP_ALREADY_ENROLLED") {
-        // The heuristic above guessed wrong — this is the self-correction:
-        // enroll() itself just gave the truthful answer.
-        setPage({ status: "enabled" })
+        // The status check above is accurate as of page load, but this can
+        // still happen from a genuine race — 2FA enabled from another tab or
+        // device in between. Correct the page rather than show a confusing
+        // "already set up" error for what looks, from here, like a fresh
+        // click on an "Enable" button. The enrollment time isn't known from
+        // here — it happened somewhere else — so this is honestly null rather
+        // than guessed.
+        setPage({ status: "enabled", enrolledAt: null })
         return
       }
 
@@ -199,6 +165,16 @@ export default function TwoFactorSettingsPage() {
             <CardDescription>
               Your account requires a code from your authenticator app when
               signing in.
+              {page.enrolledAt ? (
+                <>
+                  {" "}
+                  Turned on{" "}
+                  <span title={formatAbsoluteDate(page.enrolledAt)}>
+                    {formatRelativeTime(page.enrolledAt)}
+                  </span>
+                  .
+                </>
+              ) : null}
             </CardDescription>
           </CardHeader>
 
@@ -259,7 +235,9 @@ export default function TwoFactorSettingsPage() {
         }}
         onEnabled={() => {
           setEnrollment(null)
-          setPage({ status: "enabled" })
+          // Known exactly, unlike the race-recovery case above: verify-setup
+          // just succeeded this instant.
+          setPage({ status: "enabled", enrolledAt: new Date().toISOString() })
         }}
       />
     </div>

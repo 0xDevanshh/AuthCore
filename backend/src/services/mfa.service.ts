@@ -340,6 +340,7 @@ export async function getActiveTotpMethod(
 ): Promise<{
   id: string;
   secretEnc: string;
+  verifiedAt: Date;
 } | null> {
   const method =
     await prisma.mfaMethod.findFirst({
@@ -354,6 +355,7 @@ export async function getActiveTotpMethod(
       select: {
         id: true,
         secretEnc: true,
+        verifiedAt: true,
       },
 
       orderBy: { verifiedAt: "desc" },
@@ -366,6 +368,34 @@ export async function getActiveTotpMethod(
   return {
     id: method.id,
     secretEnc: method.secretEnc,
+
+    // The WHERE clause already requires verifiedAt not null on any row this
+    // query can return, so this is never actually null here — just not
+    // provably so to the type checker.
+    verifiedAt: method.verifiedAt as Date,
+  };
+}
+
+/**
+ * Whether the account has TOTP MFA turned on, and since when.
+ *
+ * Read-only and side-effect-free by construction: it is exactly
+ * `getActiveTotpMethod`'s existing query, reshaped for the wire, not a second
+ * query against MfaMethod. Deliberately minimal — no method type, no device
+ * info, nothing beyond what a settings page needs to decide which of its two
+ * states to render.
+ */
+export async function getMfaStatus(
+  userId: string,
+): Promise<{
+  enabled: boolean;
+  enrolledAt: string | null;
+}> {
+  const method = await getActiveTotpMethod(userId);
+
+  return {
+    enabled: method !== null,
+    enrolledAt: method?.verifiedAt.toISOString() ?? null,
   };
 }
 

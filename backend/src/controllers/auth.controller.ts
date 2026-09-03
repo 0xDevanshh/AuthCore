@@ -40,6 +40,7 @@ import {
   countRemainingRecoveryCodes,
   enrollTotp,
   generateRecoveryCodes,
+  getMfaStatus,
   verifyTotpSetup,
 } from "../services/mfa.service.ts";
 
@@ -736,6 +737,39 @@ export async function recoveryCodesCountController(
     data: {
       remaining,
     },
+  });
+}
+
+/**
+ * Answers "is TOTP MFA on for this account?" without side effects — unlike
+ * enroll, which would otherwise be the only endpoint that reveals this, and
+ * only by mutating (creating a pending secret, or throwing
+ * MFA_TOTP_ALREADY_ENROLLED) as a side effect of what is nominally a write.
+ *
+ * Deliberately minimal: enabled/enrolledAt only, no method type or device
+ * info. A settings page deciding which of two states to render does not need
+ * more than that.
+ */
+export async function mfaStatusController(
+  req: Request,
+  res: Response,
+) {
+  if (!req.auth) {
+    throw new AppError(
+      401,
+      "Authentication required",
+    );
+  }
+
+  const status =
+    await getMfaStatus(
+      req.auth.userId,
+    );
+
+  res.status(200).json({
+    success: true,
+
+    data: status,
   });
 }
 
