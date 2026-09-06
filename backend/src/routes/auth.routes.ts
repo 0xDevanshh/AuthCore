@@ -63,6 +63,12 @@ import {
 export const authRouter =
   Router();
 
+// Every `resolveApplication` below this line now has two valid callers, not
+// one: a downstream customer's backend presenting its own secret key (the
+// original case, unchanged), or a developer signing up for / logging into
+// AuthCore's own dashboard with no key at all, who resolves to the fixed
+// bootstrap application instead of being rejected. See the note on
+// BOOTSTRAP_APPLICATION_SLUG in resolveApplication.middleware.ts for why.
 authRouter.post(
   "/signup",
 
