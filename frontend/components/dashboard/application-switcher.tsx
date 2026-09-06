@@ -6,6 +6,7 @@ import { CheckIcon, ChevronsUpDownIcon, PlusIcon } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -35,7 +36,6 @@ export function ApplicationSwitcher({
             render={
               <SidebarMenuButton
                 size="lg"
-                tooltip={active?.name ?? "Application"}
                 className="data-[popup-open]:bg-sidebar-accent"
               >
                 <span
@@ -56,18 +56,20 @@ export function ApplicationSwitcher({
             side="bottom"
             className="w-(--anchor-width) min-w-56"
           >
-            <DropdownMenuLabel>Applications</DropdownMenuLabel>
-            {applications.map((app) => (
-              <DropdownMenuItem
-                key={app.id}
-                render={<Link href={routes.application(app.id)} />}
-              >
-                <span className="flex-1 truncate">{app.name}</span>
-                {app.id === activeApplicationId ? (
-                  <CheckIcon className="size-4" />
-                ) : null}
-              </DropdownMenuItem>
-            ))}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Applications</DropdownMenuLabel>
+              {applications.map((app) => (
+                <DropdownMenuItem
+                  key={app.id}
+                  render={<Link href={routes.application(app.id)} />}
+                >
+                  <span className="flex-1 truncate">{app.name}</span>
+                  {app.id === activeApplicationId ? (
+                    <CheckIcon className="size-4" />
+                  ) : null}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem render={<Link href={routes.applications} />}>
               <PlusIcon className="size-4" />

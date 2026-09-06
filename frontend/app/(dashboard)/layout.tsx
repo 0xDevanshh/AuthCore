@@ -5,6 +5,7 @@ import {
 } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { AccountMenu, type AccountUser } from "@/components/dashboard/account-menu"
+import { ThemeToggle } from "@/components/dashboard/theme-toggle"
 import type { ApplicationSummary } from "@/lib/navigation"
 
 /*
@@ -31,6 +32,7 @@ export default function DashboardLayout({
           <SidebarTrigger className="-ml-1" />
           {/* Breadcrumbs land here in a later step. */}
           <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle />
             <AccountMenu user={PLACEHOLDER_USER} />
           </div>
         </header>

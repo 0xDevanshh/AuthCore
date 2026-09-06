@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -53,12 +54,19 @@ export function AccountMenu({ user }: { user: AccountUser }) {
         </Avatar>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="bottom" className="w-56">
-        <DropdownMenuLabel className="flex flex-col gap-0.5">
-          <span className="truncate font-medium">{user.name}</span>
-          <span className="truncate text-xs font-normal text-muted-foreground">
-            {user.email}
-          </span>
-        </DropdownMenuLabel>
+        {/*
+          * Base UI's GroupLabel must live inside a Group, even one holding
+          * only the label itself — this isn't grouping the items below it,
+          * it's just satisfying that requirement.
+          */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="flex flex-col gap-0.5">
+            <span className="truncate font-medium">{user.name}</span>
+            <span className="truncate text-xs font-normal text-muted-foreground">
+              {user.email}
+            </span>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem render={<Link href={routes.settings} />}>
           <SettingsIcon className="size-4" />
