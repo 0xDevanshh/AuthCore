@@ -15,7 +15,6 @@ import {
   getApiErrorStatus,
 } from "@/lib/api-client"
 import type { ApiSuccess, Application, ApplicationResponseData } from "@/lib/api-types"
-import { useAuth } from "@/lib/auth-context"
 import { routes } from "@/lib/navigation"
 import {
   resolveApplicationRole,
@@ -42,9 +41,6 @@ export default function ApplicationLayout({
   const params = useParams<{ id: string }>()
   const applicationId = params.id
 
-  const { user } = useAuth()
-  const currentUserId = user?.id ?? null
-
   const [state, setState] = React.useState<LoadState>({ status: "loading" })
 
   /*
@@ -53,20 +49,25 @@ export default function ApplicationLayout({
    */
   const fetchApplication = React.useCallback(async (): Promise<LoadState> => {
     try {
-      const response = await apiClient.get<
-        ApiSuccess<ApplicationResponseData>
-      >(`/applications/${applicationId}`)
-
-      const application = response.data.data.application
-
       /*
-       * Resolved after the application loads rather than in parallel: the role
-       * lookup needs `ownerId` for its fallback, and a 404 should not fire a
-       * members request for an application that does not exist.
+       * Fired together, not sequentially: neither depends on the other's
+       * result — /me resolves the caller's own role server-side from the
+       * session, it no longer needs anything read from the Application
+       * first. If the id doesn't exist, both requests independently 404,
+       * which Promise.all surfaces as a single rejection.
        */
-      const role = await resolveApplicationRole(application, currentUserId)
+      const [applicationResponse, role] = await Promise.all([
+        apiClient.get<ApiSuccess<ApplicationResponseData>>(
+          `/applications/${applicationId}`,
+        ),
+        resolveApplicationRole(applicationId),
+      ])
 
-      return { status: "ready", application, role }
+      return {
+        status: "ready",
+        application: applicationResponse.data.data.application,
+        role,
+      }
     } catch (caught) {
       const status = getApiErrorStatus(caught)
 
@@ -85,7 +86,7 @@ export default function ApplicationLayout({
         message: getApiErrorMessage(caught, "We couldn't load this application."),
       }
     }
-  }, [applicationId, currentUserId])
+  }, [applicationId])
 
   React.useEffect(() => {
     let cancelled = false

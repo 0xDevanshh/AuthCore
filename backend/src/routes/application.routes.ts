@@ -3,6 +3,7 @@ import { Router } from "express";
 import {
   createApplicationController,
   getApplicationController,
+  getOwnMembershipController,
   listApplicationsController,
 } from "../controllers/application.controller.ts";
 
@@ -45,6 +46,15 @@ applicationRouter.get(
   "/:id",
 
   asyncHandler(getApplicationController),
+);
+
+// No requirePermission — deliberately readable by any active member
+// regardless of what they're permitted to do. See the note on
+// getOwnMembershipController.
+applicationRouter.get(
+  "/:id/me",
+
+  asyncHandler(getOwnMembershipController),
 );
 
 // Both inherit requireAuth + verifyRequestOrigin from this router, and

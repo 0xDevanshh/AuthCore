@@ -120,6 +120,16 @@ export type MemberListResponseData = {
 }
 
 /**
+ * GET /applications/:id/me — requireAuth only, readable by any active member.
+ * Mirrors getOwnMembershipController's response in
+ * backend/src/controllers/application.controller.ts.
+ */
+export type OwnMembershipResponseData = {
+  roles: string[]
+  permissions: string[]
+}
+
+/**
  * What `serializeApiKey` in api-key.controller.ts actually emits — deliberately
  * narrower than the Prisma model. The secret itself is returned once, at
  * creation, and never again; the list carries only the prefix.

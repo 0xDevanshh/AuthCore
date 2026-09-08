@@ -6,41 +6,25 @@ import {
 } from "../validators/application.validator.ts";
 
 import {
-  getApplicationForUser,
-} from "../services/application.service.ts";
-
-import {
   listAuditLogs,
 } from "../services/audit.service.ts";
-
-import { AppError } from "../utils/app-error.ts";
-
-function authContext(req: Request) {
-  if (!req.auth) {
-    throw new AppError(
-      401,
-      "Authentication required",
-    );
-  }
-
-  return req.auth;
-}
 
 /**
  * Lists an application's audit trail, newest first.
  *
- * The permission is enforced upstream by
- * requirePermission(AUDIT_LOG_VIEW). `getApplicationForUser` still runs, for
- * the same reason it does on the API key routes: it preserves the
- * 404-for-unknown-id behaviour and re-checks membership, so the handler is not
- * relying solely on the route being mounted with its middleware.
+ * The permission is enforced upstream by requirePermission(AUDIT_LOG_VIEW),
+ * which already verified params.id names a real, accessible application —
+ * the same trust every other controller behind this middleware extends it
+ * (see member.controller.ts). This used to re-verify via
+ * getApplicationForUser, a second existence check plus membership re-check
+ * repeating what the middleware just did; trusting params.id here removes
+ * that extra round trip. req.auth is not read at all — nothing in this
+ * handler needs the caller's own id, only the application's.
  */
 export async function listAuditLogsController(
   req: Request,
   res: Response,
 ) {
-  const auth = authContext(req);
-
   const params = applicationIdParamSchema.parse(
     req.params,
   );
@@ -49,14 +33,8 @@ export async function listAuditLogsController(
     req.query,
   );
 
-  const application =
-    await getApplicationForUser(
-      params.id,
-      auth.userId,
-    );
-
   const result = await listAuditLogs({
-    applicationId: application.id,
+    applicationId: params.id,
 
     ...(query.cursor !== undefined
       ? { cursor: query.cursor }

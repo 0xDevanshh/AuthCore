@@ -9,7 +9,6 @@ import {
 
 import {
   createApiKey,
-  getApplicationForUser,
   listApiKeys,
   revokeApiKey,
 } from "../services/application.service.ts";
@@ -54,19 +53,17 @@ export async function createApiKeyController(
   const params = applicationIdParamSchema.parse(req.params);
   const input = createApiKeySchema.parse(req.body ?? {});
 
-  // Permission enforced upstream by requirePermission(APIKEY_CREATE).
-  // This call still resolves the application and re-checks membership,
-  // which keeps the 404-for-unknown-id behaviour and is cheap insurance
-  // against the route ever being mounted without the middleware.
-  const application = await getApplicationForUser(
-    params.id,
-    auth.userId,
-  );
-
+  // Permission enforced upstream by requirePermission(APIKEY_CREATE), which
+  // already verified params.id names a real, accessible application — see
+  // the identical pattern in member.controller.ts. The extra
+  // getApplicationForUser call this used to make was a second full round
+  // trip (an existence check plus a membership re-check) repeating work the
+  // middleware just did; trusting params.id here is the same trust every
+  // other controller behind this middleware already extends it.
   const metadata = requestMetadata(req);
 
   const result = await createApiKey(
-    application.id,
+    params.id,
     auth.userId,
     {
       ...(input.name !== undefined ? { name: input.name } : {}),
@@ -98,17 +95,11 @@ export async function listApiKeysController(
   req: Request,
   res: Response,
 ) {
-  const auth = authContext(req);
-
   const params = applicationIdParamSchema.parse(req.params);
 
-  // Permission enforced upstream by requirePermission(APIKEY_LIST).
-  const application = await getApplicationForUser(
-    params.id,
-    auth.userId,
-  );
-
-  const apiKeys = await listApiKeys(application.id);
+  // Permission enforced upstream by requirePermission(APIKEY_LIST), which
+  // already verified params.id — see the note on createApiKeyController.
+  const apiKeys = await listApiKeys(params.id);
 
   res.status(200).json({
     success: true,
@@ -127,14 +118,10 @@ export async function revokeApiKeyController(
 
   const params = apiKeyIdParamSchema.parse(req.params);
 
-  // Permission enforced upstream by requirePermission(APIKEY_REVOKE).
-  const application = await getApplicationForUser(
-    params.id,
-    auth.userId,
-  );
-
+  // Permission enforced upstream by requirePermission(APIKEY_REVOKE), which
+  // already verified params.id — see the note on createApiKeyController.
   const revoked = await revokeApiKey(
-    application.id,
+    params.id,
     params.keyId,
     auth.userId,
     requestMetadata(req),

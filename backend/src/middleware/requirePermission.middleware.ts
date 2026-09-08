@@ -1,4 +1,4 @@
-import { AuditActorType, MemberStatus, ApplicationStatus } from "@prisma/client";
+import { AuditActorType } from "@prisma/client";
 
 import type {
   NextFunction,
@@ -7,13 +7,14 @@ import type {
   Response,
 } from "express";
 
-import { prisma } from "../config/prisma.ts";
-
 import { AppError } from "../utils/app-error.ts";
 
 import { logAuditEvent } from "../services/audit.service.ts";
 
-import { getRolePermissions } from "../services/rbac.service.ts";
+import {
+  findOwnMembership,
+  getPermissionsForRoles,
+} from "../services/rbac.service.ts";
 
 /**
  * Application id param. Matches the existing control-plane convention —
@@ -103,55 +104,26 @@ export function requirePermission(
       }
 
       // Single query: existence check and the caller's membership with its
-      // role ids. Existence is checked separately from membership so a
-      // nonexistent application stays a 404, matching getApplicationForUser.
-      const application =
-        await prisma.application.findFirst({
-          where: {
-            id: applicationId,
-            status: {
-              not: ApplicationStatus.DELETED,
-            },
-          },
+      // role ids, shared with the read-only /applications/:id/me endpoint —
+      // see the note on findOwnMembership. Existence is checked separately
+      // from membership so a nonexistent application stays a 404, matching
+      // getApplicationForUser.
+      const { applicationExists, membership } =
+        await findOwnMembership(applicationId, userId);
 
-          select: {
-            id: true,
-
-            memberships: {
-              where: { userId },
-
-              select: {
-                id: true,
-                status: true,
-
-                roles: {
-                  select: { roleId: true },
-                },
-              },
-
-              take: 1,
-            },
-          },
-        });
-
-      if (!application) {
+      if (!applicationExists) {
         throw new AppError(
           404,
           "Application not found",
         );
       }
 
-      const membership = application.memberships[0];
-
       // A suspended or merely invited member is treated as a non-member,
       // and told the same thing, so membership status is not disclosed.
-      if (
-        !membership ||
-        membership.status !== MemberStatus.ACTIVE
-      ) {
+      if (!membership) {
         recordDenial(
           req,
-          application.id,
+          applicationId,
           userId,
           permission,
           "NOT_A_MEMBER",
@@ -164,26 +136,16 @@ export function requirePermission(
         );
       }
 
-      const roleIds = membership.roles.map(
-        (role) => role.roleId,
-      );
-
       // Membership.roles is a list, so a member may hold several roles.
-      // Permissions are the union across all of them.
-      const permissionSets = await Promise.all(
-        roleIds.map((roleId) =>
-          getRolePermissions(roleId),
-        ),
+      // Permissions are the union across all of them, resolved in one query.
+      const permissions = await getPermissionsForRoles(
+        membership.roleIds,
       );
-
-      const permissions = [
-        ...new Set(permissionSets.flat()),
-      ];
 
       if (!permissions.includes(permission)) {
         recordDenial(
           req,
-          application.id,
+          applicationId,
           userId,
           permission,
           "MISSING_PERMISSION",
@@ -199,11 +161,11 @@ export function requirePermission(
       req.membership = {
         id: membership.id,
 
-        applicationId: application.id,
+        applicationId,
 
         userId,
 
-        roleIds,
+        roleIds: membership.roleIds,
 
         permissions,
       };
